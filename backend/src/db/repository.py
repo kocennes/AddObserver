@@ -76,9 +76,23 @@ class AdsAccountRepository:
     def link_account(
         self, principal_id: str, customer_id: str, login_customer_id: str | None
     ) -> AdsAccount:
-        """Link a Google Ads customer_id to a principal. Idempotent on (principal_id, customer_id)."""
+        """Link a Google Ads customer_id to a principal. Idempotent on (principal_id, customer_id).
+
+        If a previously disconnected account is linked again after a fresh Google
+        authorization, reactivate the existing row instead of creating a second
+        historical identity for the same customer.
+        """
         existing = self.get_account(principal_id, customer_id)
         if existing is not None:
+            if existing.status != "active" or existing.login_customer_id != login_customer_id:
+                self._conn.execute(
+                    "UPDATE ads_account SET status = ?, login_customer_id = ? WHERE id = ? AND principal_id = ?",
+                    ("active", login_customer_id, existing.id, principal_id),
+                )
+                self._conn.commit()
+                refreshed = self.get_account(principal_id, customer_id)
+                assert refreshed is not None
+                return refreshed
             return existing
         account = AdsAccount(
             id=_new_id(),
@@ -100,16 +114,33 @@ class AdsAccountRepository:
         return account
 
     def get_account(self, principal_id: str, customer_id: str) -> AdsAccount | None:
-        """Return the account only if it belongs to ``principal_id`` (cross-principal reads return None)."""
+        """Return the account row for history/admin use, regardless of active/disconnected status."""
         row = self._conn.execute(
             "SELECT * FROM ads_account WHERE principal_id = ? AND customer_id = ?",
             (principal_id, customer_id),
         ).fetchone()
         return None if row is None else _account_from_row(row)
 
+    def get_active_account(self, principal_id: str, customer_id: str) -> AdsAccount | None:
+        """Return an account only if it belongs to ``principal_id`` and is still active."""
+        row = self._conn.execute(
+            "SELECT * FROM ads_account WHERE principal_id = ? AND customer_id = ? AND status = ?",
+            (principal_id, customer_id, "active"),
+        ).fetchone()
+        return None if row is None else _account_from_row(row)
+
     def list_accounts(self, principal_id: str) -> list[AdsAccount]:
+        """Return all account rows for history/admin use, including disconnected rows."""
         rows = self._conn.execute(
             "SELECT * FROM ads_account WHERE principal_id = ? ORDER BY created_at", (principal_id,)
+        ).fetchall()
+        return [_account_from_row(row) for row in rows]
+
+    def list_active_accounts(self, principal_id: str) -> list[AdsAccount]:
+        """Return only accounts that can be used for future reads/proposals."""
+        rows = self._conn.execute(
+            "SELECT * FROM ads_account WHERE principal_id = ? AND status = ? ORDER BY created_at",
+            (principal_id, "active"),
         ).fetchall()
         return [_account_from_row(row) for row in rows]
 

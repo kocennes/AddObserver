@@ -58,6 +58,26 @@ class AdsAccountRepositoryTests(unittest.TestCase):
         customer_ids = [a.customer_id for a in self.accounts.list_accounts(self.principal_a.id)]
         self.assertEqual(customer_ids, ["1111111111"])
 
+    def test_active_accessors_hide_disconnected_rows_but_history_accessors_keep_them(self) -> None:
+        self.accounts.link_account(self.principal_a.id, "1111111111", None)
+        self.accounts.disconnect_all(self.principal_a.id)
+
+        historical = self.accounts.get_account(self.principal_a.id, "1111111111")
+        assert historical is not None
+        self.assertEqual(historical.status, "disconnected")
+        self.assertIsNone(self.accounts.get_active_account(self.principal_a.id, "1111111111"))
+        self.assertEqual(self.accounts.list_active_accounts(self.principal_a.id), [])
+
+    def test_relinking_disconnected_account_reactivates_existing_row(self) -> None:
+        first = self.accounts.link_account(self.principal_a.id, "1111111111", None)
+        self.accounts.disconnect_all(self.principal_a.id)
+
+        relinked = self.accounts.link_account(self.principal_a.id, "1111111111", "9999999999")
+
+        self.assertEqual(relinked.id, first.id)
+        self.assertEqual(relinked.status, "active")
+        self.assertEqual(relinked.login_customer_id, "9999999999")
+
 
 class OAuthCredentialRepositoryTests(unittest.TestCase):
     def setUp(self) -> None:

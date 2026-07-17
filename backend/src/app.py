@@ -24,6 +24,8 @@ import httpx
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from .api.problems import problem_response
+from .api.routes import router as api_router
 from .api.reporting import GoogleAdsReportingClient
 from .auth.approvals_routes import router as approvals_router
 from .auth.google_oauth import GOOGLE_SCOPES, GoogleOAuthClient, GoogleWebFlowOAuthClient
@@ -64,19 +66,12 @@ def _problem_response(
     code: str,
     correlation_id: str | None = None,
 ) -> JSONResponse:
-    content: dict[str, object] = {
-        "type": "about:blank",
-        "title": title,
-        "status": status_code,
-        "detail": detail,
-        "code": code,
-    }
-    if correlation_id is not None:
-        content["correlation_id"] = correlation_id
-    return JSONResponse(
+    return problem_response(
         status_code=status_code,
-        media_type="application/problem+json",
-        content=content,
+        title=title,
+        detail=detail,
+        code=code,
+        correlation_id=correlation_id,
     )
 
 
@@ -290,6 +285,7 @@ def create_app(
     )
     app.include_router(auth_router)
     app.include_router(approvals_router)
+    app.include_router(api_router)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

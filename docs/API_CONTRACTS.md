@@ -1,7 +1,7 @@
 # API ve Google Ads sözleşmeleri
 
 **Durum:** Kabul edildi  
-**Son gözden geçirme:** 2026-07-17
+**Son gözden geçirme:** 2026-07-18
 
 ## Amaç
 
@@ -24,6 +24,8 @@ edilebilir veri sözleşmelerini tanımlamak.
 
 - Dış API sürümlüdür (`/api/v1`). Request/response katı şemalıdır; bilinmeyen mutate alanları reddedilir.
 - Connector token subject'inden türetilen principal bağlamı bütün servis/repository çağrılarına açıkça aktarılır.
+- Canlı read/proposal kaynakları yalnız `active` ads_account eşleşmelerini kullanır; `disconnected` satırlar
+  geçmiş/audit için tutulur ama gelecekteki erişim kanıtı sayılmaz.
 - State-changing istekler `Idempotency-Key`, correlation ID ve yetkili kullanıcı gerektirir.
 - Zaman RFC 3339 UTC, para integer micros, ID'ler string olarak taşınır.
 - Hatalar kararlı `code`, güvenli `message`, `correlation_id` ve alan detayları döndürür; stack trace dönmez.
@@ -37,10 +39,10 @@ edilebilir veri sözleşmelerini tanımlamak.
 
 | Metot/yol | Amaç | Yetki/koruma |
 |---|---|---|
-| `GET /api/v1/accounts` | Yetkili Ads hesapları | Principal-scoped |
+| `GET /api/v1/accounts` | Yetkili Ads hesapları | Principal-scoped, yalnız active hesaplar, uygulandı |
 | `POST /api/v1/analyses` | Analiz başlat | Rate limit, idempotency |
-| `GET /api/v1/proposals` | Önerileri listele | Principal + customer scope |
-| `GET /api/v1/proposals/{id}` | Değişiklik önizle | Ownership check |
+| `GET /api/v1/proposals` | Önerileri listele | Principal + customer scope, uygulandı |
+| `GET /api/v1/proposals/{id}` | Değişiklik önizle | Ownership check, uygulandı |
 | `POST /api/v1/proposals/{id}/decisions` | Onay/red | CSRF, role, immutable hash |
 | `POST /api/v1/proposals/{id}/executions` | Onaylı değişikliği uygula | Revalidation, idempotency, audit |
 | `GET /api/v1/audit-events` | Denetim izi | Auditor role, export audit |
@@ -50,7 +52,7 @@ Execution endpoint'i ham Google Ads mutate payload kabul etmez; yalnız önceden
 ## Google Ads istemci sınırı
 
 - İç servis çağrısı doğrulanmış `principal_id` ve `customer_id` alır; MCP tool principal ID kabul etmez,
-  resource server token subject'inden türetir ve hesap eşlemesini doğrular.
+  resource server token subject'inden türetir ve active hesap eşlemesini doğrular.
 - GAQL sorguları kodda tanımlı query object/allowlist ile kurulur. Tarih ve ID parametreleri doğrulanır.
 - Mutate adapter yalnız `PRODUCT.md` içinde kabul edilmiş işlem türlerini destekler.
 - `validate_only` mümkün olan işlemlerde onay öncesi kullanılır; başarı canlı uygulama sayılmaz.
@@ -93,6 +95,12 @@ Modelin gönderdiği `customer_id`, `resource_name`, `before` ve bütçe değeri
 
 ## Güncelleme geçmişi
 
+- 2026-07-18 — HTTP/MCP read ve proposal yolları `disconnected` hesap satırlarını erişimden dışlar;
+  tekrar bağlantı aynı customer satırını `active` olarak canlandırır.
+- 2026-07-17 — `GET /api/v1/accounts` principal-scoped HTTP endpoint'i uygulandı; connector bearer token
+  audience/expiry/revocation doğrulamasını MCP ile ortak kullanır.
+- 2026-07-17 — `GET /api/v1/proposals` ve `GET /api/v1/proposals/{id}` read-only endpoint'leri
+  principal/customer izolasyonu ve problem+json hata şekliyle uygulandı.
 - 2026-07-17 — 1 MiB public ingress request body sınırı, streamed-body uygulaması ve hata kodları eklendi.
 - 2026-07-17 — `X-Correlation-ID` response header'ı ve problem response `correlation_id` sözleşmesi eklendi.
 - 2026-07-17 — Principal-scoped public connector ve Google Ads sözleşmeleri tanımlandı.

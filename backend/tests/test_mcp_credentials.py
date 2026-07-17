@@ -73,6 +73,14 @@ class ResolveGoogleAdsCredentialsTests(unittest.TestCase):
             self._resolve(principal_id=self.principal.id, customer_id="1234567890")
         self.assertEqual(ctx.exception.code, "account_not_linked")
 
+    def test_disconnected_customer_id_is_rejected_even_if_history_row_exists(self) -> None:
+        self.accounts.link_account(self.principal.id, "1234567890", None)
+        self.accounts.disconnect_all(self.principal.id)
+
+        with self.assertRaises(AdsApiError) as ctx:
+            self._resolve(principal_id=self.principal.id, customer_id="1234567890")
+        self.assertEqual(ctx.exception.code, "account_not_linked")
+
     def test_no_active_google_credential_is_rejected(self) -> None:
         self.accounts.link_account(self.principal.id, "1234567890", None)
 

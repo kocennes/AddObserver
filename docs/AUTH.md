@@ -1,7 +1,7 @@
 # Connector ve Google OAuth tasarımı
 
 **Durum:** Kabul edildi  
-**Son gözden geçirme:** 2026-07-17  
+**Son gözden geçirme:** 2026-07-18
 **Sonraki gözden geçirme:** 2026-10-17
 
 > Bu belge iki ayrı OAuth/oturum yüzeyini kapsar: (1) Claude'un connector'a bağlandığı OAuth
@@ -128,6 +128,8 @@ kanıtını `/approvals/{id}/decision` ile paylaşır (ayrı bir yetki yüzeyi e
 - Aktif Google credential `revoked` işaretlenir ve kasadaki sır kalıcı olarak yok edilir
   (`OAuthCredentialRepository.revoke_active` + `VaultClient.revoke`).
 - Bağlı her `ads_account` `disconnected` işaretlenir (satır silinmez -- geçmiş kayıtlar bozulmaz).
+  Canlı HTTP/MCP read ve proposal yolları yalnız `active` hesap eşleşmelerini kabul eder; aynı
+  `customer_id` daha sonra yeniden bağlanırsa mevcut satır tekrar `active` yapılır.
 - Tek bir `principal.disconnected` audit_event yazılır; public HTTP çağrısında kabul edilen
   `X-Correlation-ID` varsa audit kaydı aynı correlation ID'yi taşır.
 
@@ -147,6 +149,8 @@ kriteri de karşılar; audit_event append-only kaldığı için asla silinmez (`
 
 ## Güncelleme geçmişi
 
+- 2026-07-18 — Disconnect sonrası hesap satırlarının canlı read/proposal erişiminden dışlandığı ve
+  yeniden bağlantıda aynı satırın `active` yapıldığı netleştirildi.
 - 2026-07-17 — İç uygulama session modeli public directory shared-client + upstream Google OAuth modeline çevrildi.
 - 2026-07-17 — Ürün sahibi onayıyla Kabul edildi durumuna geçirildi; AS kütüphanesi ADR-0001 ile kapatıldı.
 - 2026-07-17 — Restricted-scope verification, OAuth değişikliği sonrası re-verification ve Google Ads 2SV

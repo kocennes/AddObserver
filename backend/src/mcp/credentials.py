@@ -34,7 +34,7 @@ def resolve_google_ads_credentials(
     a ``customer_id`` belonging to a different principal is indistinguishable
     from an unknown one here -- both fail closed the same way.
     """
-    account = accounts.get_account(principal_id, customer_id)
+    account = accounts.get_active_account(principal_id, customer_id)
     if account is None:
         raise AdsApiError(
             error_class=ErrorClass.VALIDATION,

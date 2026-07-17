@@ -14,6 +14,7 @@ from .domain import (
 )
 from .application import ExecutionClaim, MutationAdapter, MutationOutcome, execute_reserved_mutation
 from .payload_schema import PROPOSAL_SCHEMA_VERSION, ProposalType, build_proposal_payload
+from .serialization import proposal_status_for_read, proposal_to_dict
 
 __all__ = [
     "Approval",
@@ -33,4 +34,6 @@ __all__ = [
     "PROPOSAL_SCHEMA_VERSION",
     "ProposalType",
     "build_proposal_payload",
+    "proposal_status_for_read",
+    "proposal_to_dict",
 ]

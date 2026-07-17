@@ -70,7 +70,7 @@ def register_reporting_tools(mcp: FastMCP, context: MCPToolContext) -> None:
     def list_accessible_accounts(ctx: Context) -> list[dict[str, str | None]]:
         """List the Google Ads customer_ids linked to the caller's connector session."""
         principal_id = authenticated_principal_id(ctx)
-        accounts = AdsAccountRepository(context.conn).list_accounts(principal_id)
+        accounts = AdsAccountRepository(context.conn).list_active_accounts(principal_id)
         return [
             {"customer_id": account.customer_id, "login_customer_id": account.login_customer_id, "status": account.status}
             for account in accounts

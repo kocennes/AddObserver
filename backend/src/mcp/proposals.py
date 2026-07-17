@@ -21,7 +21,8 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from ..api.errors import AdsApiError, ErrorClass
 from ..api.queries import validate_customer_id
-from ..approval import ApprovalError, Proposal, ProposalStatus, build_proposal_payload, submit_proposal
+from ..approval import ApprovalError, Proposal, build_proposal_payload, submit_proposal
+from ..approval.serialization import proposal_to_dict
 from ..db.proposals import ProposalRepository
 from ..db.repository import AdsAccountRepository
 from .tool_support import LOCAL_WRITE, READ_ONLY_LOCAL, authenticated_principal_id, close_input_schema
@@ -44,7 +45,7 @@ def _verify_account_ownership(context: MCPToolContext, principal_id: str, custom
     must still be scoped to an account the caller has actually linked -- otherwise
     a principal could draft proposals against a ``customer_id`` it cannot access.
     """
-    account = AdsAccountRepository(context.conn).get_account(principal_id, customer_id)
+    account = AdsAccountRepository(context.conn).get_active_account(principal_id, customer_id)
     if account is None:
         raise AdsApiError(
             error_class=ErrorClass.VALIDATION,
@@ -52,27 +53,6 @@ def _verify_account_ownership(context: MCPToolContext, principal_id: str, custom
             message="Bu customer_id bu baglantiya ait degil veya henuz baglanmamis.",
             request_id=None,
         )
-
-
-def _proposal_status_for_read(proposal: Proposal, *, now: datetime | None = None) -> str:
-    """Return the externally visible proposal status, including time-based expiry."""
-    current_time = now or datetime.now(timezone.utc)
-    if current_time.tzinfo is None or current_time.utcoffset() is None:
-        raise ApprovalError("invalid_time", "now timezone bilgisi icermelidir.")
-    if proposal.status is ProposalStatus.PENDING_APPROVAL and current_time >= proposal.expires_at:
-        return ProposalStatus.EXPIRED.value
-    return proposal.status.value
-
-
-def _proposal_to_dict(proposal: Proposal) -> dict[str, Any]:
-    return {
-        "proposal_id": proposal.proposal_id,
-        "customer_id": proposal.customer_id,
-        "status": _proposal_status_for_read(proposal),
-        "proposal_hash": proposal.proposal_hash,
-        "expires_at": proposal.expires_at.isoformat(),
-        "payload": dict(proposal.payload),
-    }
 
 
 def register_proposal_tools(mcp: FastMCP, context: MCPToolContext, proposals: ProposalRepository) -> None:
@@ -123,7 +103,7 @@ def register_proposal_tools(mcp: FastMCP, context: MCPToolContext, proposals: Pr
         )
         pending = submit_proposal(draft, now=now)
         proposals.save(pending)
-        return _proposal_to_dict(pending)
+        return proposal_to_dict(pending)
 
     @mcp.tool(title="Öneri durumunu getir", annotations=READ_ONLY_LOCAL, structured_output=False)
     def get_proposal(ctx: Context, proposal_id: str) -> dict[str, Any]:
@@ -132,7 +112,7 @@ def register_proposal_tools(mcp: FastMCP, context: MCPToolContext, proposals: Pr
         proposal = proposals.get(principal_id, proposal_id)
         if proposal is None:
             raise ApprovalError("proposal_not_found", "Bu proposal_id bu baglantiya ait degil veya bulunamadi.")
-        return _proposal_to_dict(proposal)
+        return proposal_to_dict(proposal)
 
     @mcp.tool(title="Bekleyen önerileri listele", annotations=READ_ONLY_LOCAL, structured_output=False)
     def list_proposals(
@@ -154,7 +134,7 @@ def register_proposal_tools(mcp: FastMCP, context: MCPToolContext, proposals: Pr
             raise ApprovalError("invalid_limit", f"limit 1 ile {MAX_LIST_LIMIT} arasinda olmalidir.")
         return {
             "proposals": [
-                _proposal_to_dict(proposal)
+                proposal_to_dict(proposal)
                 for proposal in proposals.list_pending(principal_id, customer_id=customer_id, limit=limit)
             ]
         }
