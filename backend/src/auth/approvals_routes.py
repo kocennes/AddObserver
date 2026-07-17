@@ -38,6 +38,8 @@ from .web_session import (
 )
 
 router = APIRouter()
+WEB_SESSION_COOKIE = "web_session"
+WEB_CSRF_COOKIE = "web_csrf"
 
 
 def _error_page(title: str, description: str, status_code: int = 400) -> HTMLResponse:
@@ -89,9 +91,18 @@ async def handle_web_login_callback(
     WebSessionRepository(context.conn).create(principal.id, session.token, session.csrf_token, session.expires_at)
     response = RedirectResponse(url="/approvals", status_code=302)
     response.set_cookie(
-        "web_session",
+        WEB_SESSION_COOKIE,
         session.token,
         httponly=True,
+        secure=context.settings.environment != "local",
+        samesite="strict",
+        max_age=WEB_SESSION_TTL_SECONDS,
+        path="/",
+    )
+    response.set_cookie(
+        WEB_CSRF_COOKIE,
+        session.csrf_token,
+        httponly=False,
         secure=context.settings.environment != "local",
         samesite="strict",
         max_age=WEB_SESSION_TTL_SECONDS,
@@ -118,13 +129,13 @@ async def login(context: AuthContext = Depends(get_context)):
 
 
 def _require_session(request: Request, context: AuthContext) -> AuthenticatedWebSession:
-    raw_token = request.cookies.get("web_session")
+    raw_token = request.cookies.get(WEB_SESSION_COOKIE)
     if raw_token is None:
         raise AuthError("invalid_token", "Oturum bulunamadi.")
     lookup = WebSessionRepository(context.conn).lookup(raw_token)
     return verify_web_session(
         principal_id=lookup.principal_id,
-        csrf_token=lookup.csrf_token,
+        csrf_token_hash=lookup.csrf_token_hash,
         expires_at=lookup.expires_at,
         revoked=lookup.revoked,
         now=datetime.now(timezone.utc),
@@ -152,7 +163,13 @@ async def list_approvals(request: Request, context: AuthContext = Depends(get_co
         return RedirectResponse(url="/login", status_code=302)
 
     pending = ProposalRepository(context.conn).list_pending(session.principal_id)
-    csrf = escape(session.csrf_token)
+    csrf_cookie = request.cookies.get(WEB_CSRF_COOKIE)
+    try:
+        verify_csrf_token(csrf_cookie, session.csrf_token_hash)
+    except AuthError:
+        return RedirectResponse(url="/login", status_code=302)
+    assert csrf_cookie is not None
+    csrf = escape(csrf_cookie)
     rows: list[str] = []
     for proposal in pending:
         summary = escape(_proposal_summary(proposal))
@@ -198,7 +215,7 @@ async def disconnect(
     """
     try:
         session = _require_session(request, context)
-        verify_csrf_token(csrf_token, session.csrf_token)
+        verify_csrf_token(csrf_token, session.csrf_token_hash)
     except AuthError as error:
         return _error_page("Yetkisiz", str(error), 401)
 
@@ -213,11 +230,12 @@ async def disconnect(
         correlation_id=_request_correlation_id(request),
     )
 
-    raw_token = request.cookies.get("web_session")
+    raw_token = request.cookies.get(WEB_SESSION_COOKIE)
     if raw_token:
         WebSessionRepository(context.conn).revoke(raw_token)
     response = RedirectResponse(url="/login", status_code=302)
-    response.delete_cookie("web_session", path="/")
+    response.delete_cookie(WEB_SESSION_COOKIE, path="/")
+    response.delete_cookie(WEB_CSRF_COOKIE, path="/")
     return response
 
 
@@ -233,7 +251,7 @@ async def decide_proposal(
     or a ``proposal_id`` that does not belong to the calling principal."""
     try:
         session = _require_session(request, context)
-        verify_csrf_token(csrf_token, session.csrf_token)
+        verify_csrf_token(csrf_token, session.csrf_token_hash)
     except AuthError as error:
         return _error_page("Yetkisiz", str(error), 401)
 
@@ -289,13 +307,14 @@ async def logout(
 ):
     try:
         session = _require_session(request, context)
-        verify_csrf_token(csrf_token, session.csrf_token)
+        verify_csrf_token(csrf_token, session.csrf_token_hash)
     except AuthError as error:
         return _error_page("Yetkisiz", str(error), 401)
 
-    raw_token = request.cookies.get("web_session")
+    raw_token = request.cookies.get(WEB_SESSION_COOKIE)
     assert raw_token is not None
     WebSessionRepository(context.conn).revoke(raw_token)
     response = RedirectResponse(url="/login", status_code=302)
-    response.delete_cookie("web_session", path="/")
+    response.delete_cookie(WEB_SESSION_COOKIE, path="/")
+    response.delete_cookie(WEB_CSRF_COOKIE, path="/")
     return response

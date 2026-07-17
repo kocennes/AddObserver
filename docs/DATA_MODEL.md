@@ -1,7 +1,7 @@
 # Veri modeli
 
 **Durum:** Kabul edildi  
-**Son gözden geçirme:** 2026-07-17
+**Son gözden geçirme:** 2026-07-18
 
 ## Amaç
 
@@ -42,7 +42,7 @@ mantıksal varlıklarını ve yaşam döngüsünü tanımlamak.
 | `execution` | `proposal_id`, `idempotency_key`, `before`, `after`, `google_request_id`, `status` | Onay hash'i eşleşir |
 | `audit_event` | `event_id`, `occurred_at`, `actor`, `principal_id`, `customer_id`, `event_type`, `proposal_id`/`approval_id`/`execution_id`, `outcome`, `reason_code`, `correlation_id`, `google_request_id` | Append-only |
 | `web_login_state` | `state_hash`, `status`, `expires_at` | Tek kullanımlık; `/approvals` girişi için, Google credential'dan bağımsız |
-| `web_session` | `token_hash`, `principal_id`, `csrf_token`, `expires_at`, `revoked_at` | `/approvals` tarayıcı oturumu; connector access token'dan ayrı bir düzlem (docs/AUTH.md) |
+| `web_session` | `token_hash`, `principal_id`, `csrf_token_hash`, `expires_at`, `revoked_at` | `/approvals` tarayıcı oturumu; connector access token'dan ayrı bir düzlem (docs/AUTH.md) |
 
 ## Durum makineleri
 
@@ -78,6 +78,8 @@ mantıksal varlıklarını ve yaşam döngüsünü tanımlamak.
 
 ## Güncelleme geçmişi
 
+- 2026-07-18 — `web_session` CSRF alanı hash-at-rest sözleşmesine göre `csrf_token_hash`
+  olarak netleştirildi (docs/AUTH.md, docs/SECURITY.md).
 - 2026-07-17 — `/approvals` insan onay yüzeyi için `web_login_state`/`web_session` varlıkları
   eklendi (docs/AUTH.md, docs/ARCHITECTURE.md).
 - 2026-07-17 — İnsan onay/red kararlarının `approval.decided` audit_event'i ile atomik yazılması

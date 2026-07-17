@@ -1,9 +1,10 @@
 """Persistence for backend.src.approval.domain objects and the append-only audit log.
 
-Onay/hash/süre/sahiplik doğrulaması burada TEKRARLANMAZ — bu modül yalnız
+Onay/süre/sahiplik iş kuralları burada TEKRARLANMAZ — bu modül yalnız
 ``backend.src.approval.domain``'in ürettiği immutable ``Proposal``/``Approval``/
-``ExecutionReservation`` nesnelerini saklar ve principal_id ile filtrelenmiş okur. İş
-kurallarının tek kaynağı ``backend/src/approval/domain.py`` olarak kalır.
+``ExecutionReservation`` nesnelerini saklar ve principal_id ile filtrelenmiş okur. Storage
+katmanı ayrıca proposal principal/customer/hash kapsamını koruyan bütünlük guard'ları
+taşır; iş kurallarının tek kaynağı ``backend/src/approval/domain.py`` olarak kalır.
 """
 
 from __future__ import annotations
@@ -39,14 +40,15 @@ class ProposalRepository:
         self._conn = conn
 
     def save(self, proposal: Proposal) -> None:
-        """Insert or update only within the proposal's immutable owner/account scope."""
+        """Insert a proposal or advance status without changing immutable content."""
         cursor = self._conn.execute(
             "INSERT INTO proposal (id, principal_id, customer_id, payload, proposal_hash, status, "
             "expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(id) DO UPDATE SET status = excluded.status, payload = excluded.payload, "
-            "proposal_hash = excluded.proposal_hash "
+            "ON CONFLICT(id) DO UPDATE SET status = excluded.status "
             "WHERE proposal.principal_id = excluded.principal_id "
-            "AND proposal.customer_id = excluded.customer_id",
+            "AND proposal.customer_id = excluded.customer_id "
+            "AND proposal.proposal_hash = excluded.proposal_hash "
+            "AND proposal.expires_at = excluded.expires_at",
             (
                 proposal.proposal_id, proposal.principal_id, proposal.customer_id,
                 json.dumps(dict(proposal.payload)), proposal.proposal_hash, proposal.status.value,
@@ -55,7 +57,9 @@ class ProposalRepository:
         )
         if cursor.rowcount != 1:
             self._conn.rollback()
-            raise ValueError("proposal_id farkli bir principal veya customer kapsaminda kullanilmis")
+            raise ValueError(
+                "proposal_id farkli bir principal/customer kapsaminda veya degisen payload/hash ile kullanilmis"
+            )
         self._conn.commit()
 
     def get(self, principal_id: str, proposal_id: str) -> Proposal | None:
@@ -156,15 +160,15 @@ class ApprovalRepository:
         audited_event = replace(audit_event, approval_id=approval_id)
         with self._conn:
             cursor = self._conn.execute(
-                "UPDATE proposal SET status = ?, payload = ?, proposal_hash = ? "
-                "WHERE id = ? AND principal_id = ? AND customer_id = ?",
+                "UPDATE proposal SET status = ? "
+                "WHERE id = ? AND principal_id = ? AND customer_id = ? AND proposal_hash = ?",
                 (
-                    proposal.status.value, json.dumps(dict(proposal.payload)), proposal.proposal_hash,
-                    proposal.proposal_id, proposal.principal_id, proposal.customer_id,
+                    proposal.status.value, proposal.proposal_id, proposal.principal_id,
+                    proposal.customer_id, proposal.proposal_hash,
                 ),
             )
             if cursor.rowcount != 1:
-                raise ValueError("proposal decision principal/customer kapsaminda bulunamadi")
+                raise ValueError("proposal decision principal/customer/hash kapsaminda bulunamadi")
             self._conn.execute(
                 "INSERT INTO approval (id, proposal_id, principal_id, approver_id, decision, "
                 "proposal_hash, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?)",

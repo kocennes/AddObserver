@@ -91,13 +91,13 @@ class AuthenticatedWebSession:
     """The result of successfully verifying a browser session token."""
 
     principal_id: str
-    csrf_token: str
+    csrf_token_hash: str
 
 
 def verify_web_session(
     *,
     principal_id: str | None,
-    csrf_token: str | None,
+    csrf_token_hash: str | None,
     expires_at: datetime | None,
     revoked: bool,
     now: datetime,
@@ -108,18 +108,18 @@ def verify_web_session(
     ``None``/``revoked=True`` for an unknown/revoked token so this function has a
     single fail-closed path, matching ``auth.deps.verify_access_token``'s shape.
     """
-    if principal_id is None or csrf_token is None or expires_at is None:
+    if principal_id is None or csrf_token_hash is None or expires_at is None:
         raise AuthError("invalid_token", "Oturum bilinmiyor veya iptal edilmis.")
     if revoked:
         raise AuthError("invalid_token", "Oturum iptal edilmis.")
     if _utc(now) >= _utc(expires_at):
         raise AuthError("invalid_token", "Oturumun suresi dolmus.")
-    return AuthenticatedWebSession(principal_id=principal_id, csrf_token=csrf_token)
+    return AuthenticatedWebSession(principal_id=principal_id, csrf_token_hash=csrf_token_hash)
 
 
-def verify_csrf_token(presented: str | None, expected: str) -> None:
+def verify_csrf_token(presented: str | None, expected_hash: str) -> None:
     """Constant-time CSRF field check for every state-changing ``/approvals`` POST."""
-    if not presented or not secrets.compare_digest(presented, expected):
+    if not presented or not secrets.compare_digest(hash_token(presented), expected_hash):
         raise AuthError("invalid_csrf", "CSRF token eslesmiyor veya eksik.")
 
 

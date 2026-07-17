@@ -67,7 +67,7 @@ class WebSessionLookup:
     """A looked-up session row, or the fail-closed shape for unknown/revoked tokens."""
 
     principal_id: str | None
-    csrf_token: str | None
+    csrf_token_hash: str | None
     expires_at: datetime | None
     revoked: bool
 
@@ -80,9 +80,9 @@ class WebSessionRepository:
 
     def create(self, principal_id: str, raw_token: str, csrf_token: str, expires_at: datetime) -> WebSessionIssued:
         self._conn.execute(
-            "INSERT INTO web_session (token_hash, principal_id, csrf_token, expires_at, revoked_at, created_at) "
+            "INSERT INTO web_session (token_hash, principal_id, csrf_token_hash, expires_at, revoked_at, created_at) "
             "VALUES (?, ?, ?, ?, NULL, ?)",
-            (hash_token(raw_token), principal_id, csrf_token, expires_at.isoformat(), _now()),
+            (hash_token(raw_token), principal_id, hash_token(csrf_token), expires_at.isoformat(), _now()),
         )
         self._conn.commit()
         return WebSessionIssued(token=raw_token, csrf_token=csrf_token)
@@ -93,10 +93,10 @@ class WebSessionRepository:
             "SELECT * FROM web_session WHERE token_hash = ?", (hash_token(raw_token),)
         ).fetchone()
         if row is None:
-            return WebSessionLookup(principal_id=None, csrf_token=None, expires_at=None, revoked=False)
+            return WebSessionLookup(principal_id=None, csrf_token_hash=None, expires_at=None, revoked=False)
         return WebSessionLookup(
             principal_id=row["principal_id"],
-            csrf_token=row["csrf_token"],
+            csrf_token_hash=row["csrf_token_hash"],
             expires_at=datetime.fromisoformat(row["expires_at"]),
             revoked=row["revoked_at"] is not None,
         )

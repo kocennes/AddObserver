@@ -159,6 +159,27 @@ class ProposalPersistenceTests(unittest.TestCase):
         self.assertEqual(original.customer_id, loaded.customer_id)
         self.assertEqual(original.proposal_hash, loaded.proposal_hash)
 
+    def test_same_scope_save_cannot_replace_proposal_payload(self) -> None:
+        original = self._pending_proposal()
+        self.proposals.save(original)
+        changed = submit_proposal(
+            Proposal.create(
+                proposal_id=original.proposal_id,
+                principal_id=self.principal_a.id,
+                customer_id=original.customer_id,
+                payload={"type": "campaign_budget_update", "after": {"amount_micros": 9_000_000}},
+                expires_at=original.expires_at,
+            ),
+            now=self.now,
+        )
+
+        with self.assertRaisesRegex(ValueError, "payload/hash"):
+            self.proposals.save(changed)
+
+        loaded = self.proposals.get(self.principal_a.id, original.proposal_id)
+        self.assertEqual(original.proposal_hash, loaded.proposal_hash)
+        self.assertEqual(dict(original.payload), dict(loaded.payload))
+
     def test_save_after_approval_updates_status(self) -> None:
         pending = self._pending_proposal()
         self.proposals.save(pending)
@@ -258,6 +279,54 @@ class ProposalPersistenceTests(unittest.TestCase):
             ProposalStatus.PENDING_APPROVAL,
         )
         self.assertIsNone(self.approvals.get_latest(self.principal_a.id, "proposal-1"))
+
+    def test_save_decision_with_audit_cannot_advance_tampered_payload_hash(self) -> None:
+        pending = self._pending_proposal()
+        self.proposals.save(pending)
+        tampered_pending = submit_proposal(
+            Proposal.create(
+                proposal_id=pending.proposal_id,
+                principal_id=self.principal_a.id,
+                customer_id=pending.customer_id,
+                payload={"type": "campaign_budget_update", "after": {"amount_micros": 9_000_000}},
+                expires_at=pending.expires_at,
+            ),
+            now=self.now,
+        )
+        tampered_approved, tampered_approval = approve_proposal(
+            tampered_pending,
+            principal_id=self.principal_a.id,
+            approver_id=self.principal_a.id,
+            decision=Decision.APPROVE,
+            now=self.now,
+        )
+
+        with self.assertRaisesRegex(ValueError, "hash"):
+            self.approvals.save_decision_with_audit(
+                tampered_approved,
+                tampered_approval,
+                AuditEvent(
+                    event_id="evt-tampered",
+                    occurred_at=self.now,
+                    actor=self.principal_a.id,
+                    principal_id=self.principal_a.id,
+                    customer_id=tampered_approved.customer_id,
+                    event_type="approval.decided",
+                    proposal_id=tampered_approved.proposal_id,
+                    approval_id=None,
+                    execution_id=None,
+                    outcome=Decision.APPROVE.value,
+                    reason_code=None,
+                    correlation_id="corr-tampered",
+                    google_request_id=None,
+                ),
+            )
+
+        self.assertEqual(
+            self.proposals.get(self.principal_a.id, pending.proposal_id).status,
+            ProposalStatus.PENDING_APPROVAL,
+        )
+        self.assertIsNone(self.approvals.get_latest(self.principal_a.id, pending.proposal_id))
 
     def test_save_decision_with_audit_rejects_mismatched_audit_event(self) -> None:
         pending = self._pending_proposal()

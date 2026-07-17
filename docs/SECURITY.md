@@ -1,7 +1,7 @@
 # Güvenlik standardı
 
 **Durum:** Kabul edildi  
-**Son gözden geçirme:** 2026-07-17  
+**Son gözden geçirme:** 2026-07-18
 **Sonraki gözden geçirme:** 2026-10-17
 
 ## Amaç
@@ -151,9 +151,9 @@ gereksinimleri uygulanır.
   anahtarı kullanır. CORS açık allowlist'tir.
   - Uygulama: `/approvals` (docs/AUTH.md "Approval-UI web girişi") -- session cookie
     `HttpOnly`+`SameSite=Strict`+(yerel ortam dışında) `Secure`; her karar POST'u ayrıca
-    session'dan bağımsız üretilmiş bir `csrf_token`'ı `secrets.compare_digest` ile doğrular;
-    `/logout` ve `/disconnect` aynı synchronizer token desenini kullanır. Token değerleri
-    yalnız SHA-256 hash'i olarak saklanır.
+    session'dan bağımsız üretilmiş bir `csrf_token`'ı hashleyip saklı hash'e karşı
+    `secrets.compare_digest` ile doğrular; `/logout` ve `/disconnect` aynı synchronizer token
+    desenini kullanır. Session ve CSRF token değerleri yalnız SHA-256 hash'i olarak saklanır.
 - Public HTTP cevapları varsayılan olarak `Cache-Control: no-store`, `Referrer-Policy: no-referrer`,
   `X-Content-Type-Options: nosniff` ve form-only katı CSP (`default-src 'none'`, `script-src 'none'`,
   `form-action 'self'`, `frame-ancestors 'none'`) taşır.
@@ -194,6 +194,7 @@ gereksinimleri uygulanır.
 
 ## Güncelleme geçmişi
 
+- 2026-07-18 — Approval UI CSRF token doğrulaması hash-at-rest davranışıyla netleştirildi.
 - 2026-07-17 — `/approvals` insan onay yüzeyi için CSRF token + cookie özniteliği kararı eklendi
   (docs/AUTH.md).
 - 2026-07-17 — Public HTTP güvenlik header'ları ve `/logout` CSRF doğrulaması uygulama standardına eklendi.

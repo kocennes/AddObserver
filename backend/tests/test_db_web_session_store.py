@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from backend.src.auth.web_session import hash_token
 from backend.src.db.connection import connect
 from backend.src.db.repository import PrincipalRepository
 from backend.src.db.web_session_store import WebLoginStateRepository, WebSessionRepository
@@ -21,6 +22,9 @@ class WebLoginStateRepositoryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.conn = connect(":memory:")
         self.states = WebLoginStateRepository(self.conn)
+
+    def tearDown(self) -> None:
+        self.conn.close()
 
     def test_claim_succeeds_once(self) -> None:
         self.states.create("raw-state-1", NOW + timedelta(minutes=10))
@@ -45,6 +49,9 @@ class WebSessionRepositoryTests(unittest.TestCase):
         self.principals = PrincipalRepository(self.conn)
         self.sessions = WebSessionRepository(self.conn)
 
+    def tearDown(self) -> None:
+        self.conn.close()
+
     def test_create_and_lookup_round_trip(self) -> None:
         principal = self.principals.get_or_create("https://accounts.google.com", "google-sub-1")
         expires_at = NOW + timedelta(minutes=30)
@@ -53,14 +60,18 @@ class WebSessionRepositoryTests(unittest.TestCase):
 
         lookup = self.sessions.lookup("raw-token-1")
         self.assertEqual(lookup.principal_id, principal.id)
-        self.assertEqual(lookup.csrf_token, "raw-csrf-1")
+        self.assertEqual(lookup.csrf_token_hash, hash_token("raw-csrf-1"))
         self.assertEqual(lookup.expires_at, expires_at)
         self.assertFalse(lookup.revoked)
+        stored = self.conn.execute("SELECT token_hash, csrf_token_hash FROM web_session").fetchone()
+        self.assertEqual(stored["token_hash"], hash_token("raw-token-1"))
+        self.assertEqual(stored["csrf_token_hash"], hash_token("raw-csrf-1"))
+        self.assertNotEqual(stored["csrf_token_hash"], "raw-csrf-1")
 
     def test_lookup_of_unknown_token_is_fail_closed_shape(self) -> None:
         lookup = self.sessions.lookup("never-issued")
         self.assertIsNone(lookup.principal_id)
-        self.assertIsNone(lookup.csrf_token)
+        self.assertIsNone(lookup.csrf_token_hash)
         self.assertIsNone(lookup.expires_at)
         self.assertFalse(lookup.revoked)
 
@@ -86,6 +97,9 @@ class PrincipalRepositoryGetTests(unittest.TestCase):
     def setUp(self) -> None:
         self.conn = connect(":memory:")
         self.principals = PrincipalRepository(self.conn)
+
+    def tearDown(self) -> None:
+        self.conn.close()
 
     def test_get_returns_none_for_unknown_subject(self) -> None:
         """Login asla yeni principal yaratmaz -- yalnız get_or_create yaratır."""

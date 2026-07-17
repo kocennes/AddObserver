@@ -105,6 +105,7 @@ class ApprovalsHttpTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(callback_response.status_code, 302)
                 self.assertEqual(callback_response.headers["location"], "/approvals")
                 self.assertIn("web_session", callback_response.cookies)
+                self.assertIn("web_csrf", callback_response.cookies)
 
                 page = await client.get("/approvals")
                 self.assertEqual(page.status_code, 200)
@@ -176,6 +177,22 @@ class ApprovalsHttpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(page.status_code, 302)
         self.assertEqual(page.headers["location"], "/login")
 
+    async def test_approvals_without_csrf_cookie_redirects_to_login(self) -> None:
+        _, app = self._build_app(login_subject="sub-1")
+        conn = app.state.auth_context.conn
+        PrincipalRepository(conn).get_or_create("https://accounts.google.com", "sub-1")
+
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url=PUBLIC_BASE_URL
+            ) as client:
+                await self._login(client)
+                client.cookies.delete("web_csrf", domain="connector.example.com", path="/")
+                page = await client.get("/approvals")
+
+        self.assertEqual(page.status_code, 302)
+        self.assertEqual(page.headers["location"], "/login")
+
     async def test_decision_without_session_is_unauthorized(self) -> None:
         _, app = self._build_app()
         async with app.router.lifespan_context(app):
@@ -227,6 +244,7 @@ class ApprovalsHttpTests(unittest.IsolatedAsyncioTestCase):
                 transport=httpx.ASGITransport(app=app), base_url=PUBLIC_BASE_URL
             ) as client:
                 client.cookies.set("web_session", attacker_session.token, domain="connector.example.com")
+                client.cookies.set("web_csrf", attacker_session.csrf_token, domain="connector.example.com")
                 page = await client.get("/approvals")
                 self.assertNotIn("campaign_pause", page.text)  # attacker has no proposals of their own
 

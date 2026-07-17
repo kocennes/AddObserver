@@ -103,9 +103,11 @@ hafif bir tarayıcı oturumu eklendi.
   çerezi verir. Token değeri yalnız SHA-256 hash'i olarak saklanır (mevcut
   `authorization_code`/`access_token` deseniyle aynı).
 - **CSRF:** Oturumla birlikte ayrı, bağımsız bir `csrf_token` üretilir (session token'dan
-  tahmin edilemez); `/approvals` sayfası bunu her formda gizli alan olarak taşır,
-  `POST /approvals/{id}/decision`, `POST /disconnect` ve `POST /logout`
-  `secrets.compare_digest` ile eşleştirir. Bu, `SECURITY.md`'nin "state-changing endpoint'ler
+  tahmin edilemez). DB'de yalnız SHA-256 hash'i saklanır; raw değer tarayıcıya `web_csrf`
+  adlı `SameSite=Strict` cookie ile verilir ve `/approvals` sayfası hash eşleşmesini
+  doğruladıktan sonra bunu her formda gizli alan olarak taşır. `POST /approvals/{id}/decision`,
+  `POST /disconnect` ve `POST /logout`, formdaki raw token'ı hashleyip `secrets.compare_digest`
+  ile saklı hash'e karşı eşleştirir. Bu, `SECURITY.md`'nin "state-changing endpoint'ler
   CSRF koruması ... kullanır" kuralını bu yeni yüzey için karşılar.
 - **Yetki sınırı:** `/approvals` yalnız oturumun `principal_id`'sine ait bekleyen önerileri
   listeler (`ProposalRepository.list_pending`); karar kaydı da yalnız
@@ -151,6 +153,8 @@ kriteri de karşılar; audit_event append-only kaldığı için asla silinmez (`
 
 - 2026-07-18 — Disconnect sonrası hesap satırlarının canlı read/proposal erişiminden dışlandığı ve
   yeniden bağlantıda aynı satırın `active` yapıldığı netleştirildi.
+- 2026-07-18 — Approval UI CSRF token'ının DB'de yalnız hash olarak tutulduğu; raw değerin
+  `web_csrf` SameSite cookie ile form render için kullanıldığı netleştirildi.
 - 2026-07-17 — İç uygulama session modeli public directory shared-client + upstream Google OAuth modeline çevrildi.
 - 2026-07-17 — Ürün sahibi onayıyla Kabul edildi durumuna geçirildi; AS kütüphanesi ADR-0001 ile kapatıldı.
 - 2026-07-17 — Restricted-scope verification, OAuth değişikliği sonrası re-verification ve Google Ads 2SV
