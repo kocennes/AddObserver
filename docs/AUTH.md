@@ -104,13 +104,17 @@ hafif bir tarayıcı oturumu eklendi.
   `authorization_code`/`access_token` deseniyle aynı).
 - **CSRF:** Oturumla birlikte ayrı, bağımsız bir `csrf_token` üretilir (session token'dan
   tahmin edilemez); `/approvals` sayfası bunu her formda gizli alan olarak taşır,
-  `POST /approvals/{id}/decision` `secrets.compare_digest` ile eşleştirir. Bu,
-  `SECURITY.md`'nin "state-changing endpoint'ler CSRF koruması ... kullanır" kuralını bu yeni
-  yüzey için karşılar.
+  `POST /approvals/{id}/decision`, `POST /disconnect` ve `POST /logout`
+  `secrets.compare_digest` ile eşleştirir. Bu, `SECURITY.md`'nin "state-changing endpoint'ler
+  CSRF koruması ... kullanır" kuralını bu yeni yüzey için karşılar.
 - **Yetki sınırı:** `/approvals` yalnız oturumun `principal_id`'sine ait bekleyen önerileri
   listeler (`ProposalRepository.list_pending`); karar kaydı da yalnız
   `ProposalRepository.get(principal_id, proposal_id)` ile principal-kapsamlı okunan bir öneri
   üzerinde çalışır -- başka principal'ın `proposal_id`'si `404` döner, veri sızdırmaz.
+- **Audit:** İnsan kararı, proposal durum güncellemesi, immutable `approval` satırı ve
+  `approval.decided` audit_event'i aynı transaction içinde kaydedilir. Audit yazılamazsa
+  karar da kaydedilmez; public HTTP çağrısında kabul edilen `X-Correlation-ID` audit kaydına
+  aynen taşınır.
 
 ### Disconnect (uygulandı)
 
@@ -124,7 +128,8 @@ kanıtını `/approvals/{id}/decision` ile paylaşır (ayrı bir yetki yüzeyi e
 - Aktif Google credential `revoked` işaretlenir ve kasadaki sır kalıcı olarak yok edilir
   (`OAuthCredentialRepository.revoke_active` + `VaultClient.revoke`).
 - Bağlı her `ads_account` `disconnected` işaretlenir (satır silinmez -- geçmiş kayıtlar bozulmaz).
-- Tek bir `principal.disconnected` audit_event yazılır.
+- Tek bir `principal.disconnected` audit_event yazılır; public HTTP çağrısında kabul edilen
+  `X-Correlation-ID` varsa audit kaydı aynı correlation ID'yi taşır.
 
 Idempotent: ikinci çağrı hata vermez, yalnız zaten iptal edilmiş olanı tekrar iptal etmeye çalışmaz.
 "Account deletion talebi" ayrıca bir silme akışı GEREKTİRMEZ -- kasadaki sır kalıcı olarak yok
@@ -152,3 +157,4 @@ kriteri de karşılar; audit_event append-only kaldığı için asla silinmez (`
 - 2026-07-17 — `POST /disconnect` uygulandı: connector token'ları, Google credential/vault sırrı
   ve bağlı hesaplar tek adımda iptal edilir; `docs/PRODUCT.md`'nin disconnect/deletion kabul
   kriterini kapatır.
+- 2026-07-17 — Approval UI logout CSRF doğrulaması ve public HTTP güvenlik header'ları eklendi.

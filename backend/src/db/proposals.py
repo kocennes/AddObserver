@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import MappingProxyType
 
@@ -23,6 +24,8 @@ from ..approval import (
     ProposalStatus,
 )
 from .models import AuditEvent, ExecutionStatus
+
+MAX_PENDING_PROPOSAL_LIMIT = 100
 
 
 def _now() -> str:
@@ -62,11 +65,33 @@ class ProposalRepository:
         ).fetchone()
         return None if row is None else _proposal_from_row(row)
 
-    def list_pending(self, principal_id: str) -> list[Proposal]:
-        """Return this principal's proposals awaiting a human decision, oldest first."""
+    def list_pending(
+        self,
+        principal_id: str,
+        *,
+        customer_id: str | None = None,
+        limit: int = 50,
+        now: datetime | None = None,
+    ) -> list[Proposal]:
+        """Return this principal's unexpired proposals awaiting a human decision, oldest first."""
+        if limit < 1:
+            raise ValueError("limit pozitif olmalidir")
+        if limit > MAX_PENDING_PROPOSAL_LIMIT:
+            raise ValueError(f"limit en fazla {MAX_PENDING_PROPOSAL_LIMIT} olabilir")
+        cutoff_time = now or datetime.now(timezone.utc)
+        if cutoff_time.tzinfo is None or cutoff_time.utcoffset() is None:
+            raise ValueError("now timezone bilgisi icermelidir")
+        cutoff = cutoff_time.astimezone(timezone.utc).isoformat()
+        params: list[object] = [principal_id, ProposalStatus.PENDING_APPROVAL.value, cutoff]
+        customer_filter = ""
+        if customer_id is not None:
+            customer_filter = " AND customer_id = ?"
+            params.append(customer_id)
+        params.append(limit)
         rows = self._conn.execute(
-            "SELECT * FROM proposal WHERE principal_id = ? AND status = ? ORDER BY created_at",
-            (principal_id, ProposalStatus.PENDING_APPROVAL.value),
+            "SELECT * FROM proposal WHERE principal_id = ? AND status = ? AND expires_at > ?"
+            f"{customer_filter} ORDER BY created_at LIMIT ?",
+            params,
         ).fetchall()
         return [_proposal_from_row(row) for row in rows]
 
@@ -106,6 +131,50 @@ class ApprovalRepository:
             ),
         )
         self._conn.commit()
+
+    def save_decision_with_audit(
+        self,
+        proposal: Proposal,
+        approval: Approval,
+        audit_event: AuditEvent,
+    ) -> str:
+        """Atomically store a human decision and its append-only audit event."""
+        if approval.proposal_id != proposal.proposal_id or approval.principal_id != proposal.principal_id:
+            raise ValueError("approval proposal ve principal kapsami uyusmuyor")
+        if approval.proposal_hash != proposal.proposal_hash:
+            raise ValueError("approval proposal hash'i guncel proposal ile uyusmuyor")
+        if audit_event.proposal_id != proposal.proposal_id or audit_event.principal_id != proposal.principal_id:
+            raise ValueError("audit event proposal ve principal kapsami uyusmuyor")
+        if audit_event.customer_id != proposal.customer_id:
+            raise ValueError("audit event customer kapsami uyusmuyor")
+        if audit_event.actor != approval.approver_id:
+            raise ValueError("audit event actor onaylayan ile uyusmuyor")
+        if audit_event.event_type != "approval.decided" or audit_event.outcome != approval.decision.value:
+            raise ValueError("audit event approval karari ile uyusmuyor")
+
+        approval_id = str(uuid.uuid4())
+        audited_event = replace(audit_event, approval_id=approval_id)
+        with self._conn:
+            cursor = self._conn.execute(
+                "UPDATE proposal SET status = ?, payload = ?, proposal_hash = ? "
+                "WHERE id = ? AND principal_id = ? AND customer_id = ?",
+                (
+                    proposal.status.value, json.dumps(dict(proposal.payload)), proposal.proposal_hash,
+                    proposal.proposal_id, proposal.principal_id, proposal.customer_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("proposal decision principal/customer kapsaminda bulunamadi")
+            self._conn.execute(
+                "INSERT INTO approval (id, proposal_id, principal_id, approver_id, decision, "
+                "proposal_hash, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    approval_id, approval.proposal_id, approval.principal_id, approval.approver_id,
+                    approval.decision.value, approval.proposal_hash, approval.decided_at.isoformat(),
+                ),
+            )
+            _insert_audit_event(self._conn, audited_event)
+        return approval_id
 
     def get_latest(self, principal_id: str, proposal_id: str) -> Approval | None:
         """Return the most recent decision only if it belongs to ``principal_id``."""
@@ -209,17 +278,7 @@ class AuditRepository:
         self._conn = conn
 
     def insert(self, event: AuditEvent) -> None:
-        self._conn.execute(
-            "INSERT INTO audit_event (event_id, occurred_at, actor, principal_id, customer_id, "
-            "event_type, proposal_id, approval_id, execution_id, outcome, reason_code, "
-            "correlation_id, google_request_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                event.event_id, event.occurred_at.isoformat(), event.actor, event.principal_id,
-                event.customer_id, event.event_type, event.proposal_id, event.approval_id,
-                event.execution_id, event.outcome, event.reason_code, event.correlation_id,
-                event.google_request_id,
-            ),
-        )
+        _insert_audit_event(self._conn, event)
         self._conn.commit()
 
     def list_for_principal(self, principal_id: str) -> list[AuditEvent]:
@@ -227,6 +286,20 @@ class AuditRepository:
             "SELECT * FROM audit_event WHERE principal_id = ? ORDER BY occurred_at", (principal_id,)
         ).fetchall()
         return [_audit_from_row(row) for row in rows]
+
+
+def _insert_audit_event(conn: sqlite3.Connection, event: AuditEvent) -> None:
+    conn.execute(
+        "INSERT INTO audit_event (event_id, occurred_at, actor, principal_id, customer_id, "
+        "event_type, proposal_id, approval_id, execution_id, outcome, reason_code, "
+        "correlation_id, google_request_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            event.event_id, event.occurred_at.isoformat(), event.actor, event.principal_id,
+            event.customer_id, event.event_type, event.proposal_id, event.approval_id,
+            event.execution_id, event.outcome, event.reason_code, event.correlation_id,
+            event.google_request_id,
+        ),
+    )
 
 
 def _audit_from_row(row: sqlite3.Row) -> AuditEvent:

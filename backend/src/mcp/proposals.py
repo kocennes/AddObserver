@@ -20,7 +20,8 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 
 from ..api.errors import AdsApiError, ErrorClass
-from ..approval import ApprovalError, Proposal, build_proposal_payload, submit_proposal
+from ..api.queries import validate_customer_id
+from ..approval import ApprovalError, Proposal, ProposalStatus, build_proposal_payload, submit_proposal
 from ..db.proposals import ProposalRepository
 from ..db.repository import AdsAccountRepository
 from .tool_support import LOCAL_WRITE, READ_ONLY_LOCAL, authenticated_principal_id, close_input_schema
@@ -32,6 +33,8 @@ from .tools import MCPToolContext
 MIN_EXPIRY_MINUTES = 5
 MAX_EXPIRY_MINUTES = 24 * 60
 DEFAULT_EXPIRY_MINUTES = 60
+DEFAULT_LIST_LIMIT = 50
+MAX_LIST_LIMIT = 100
 
 
 def _verify_account_ownership(context: MCPToolContext, principal_id: str, customer_id: str) -> None:
@@ -51,11 +54,21 @@ def _verify_account_ownership(context: MCPToolContext, principal_id: str, custom
         )
 
 
+def _proposal_status_for_read(proposal: Proposal, *, now: datetime | None = None) -> str:
+    """Return the externally visible proposal status, including time-based expiry."""
+    current_time = now or datetime.now(timezone.utc)
+    if current_time.tzinfo is None or current_time.utcoffset() is None:
+        raise ApprovalError("invalid_time", "now timezone bilgisi icermelidir.")
+    if proposal.status is ProposalStatus.PENDING_APPROVAL and current_time >= proposal.expires_at:
+        return ProposalStatus.EXPIRED.value
+    return proposal.status.value
+
+
 def _proposal_to_dict(proposal: Proposal) -> dict[str, Any]:
     return {
         "proposal_id": proposal.proposal_id,
         "customer_id": proposal.customer_id,
-        "status": proposal.status.value,
+        "status": _proposal_status_for_read(proposal),
         "proposal_hash": proposal.proposal_hash,
         "expires_at": proposal.expires_at.isoformat(),
         "payload": dict(proposal.payload),
@@ -121,5 +134,30 @@ def register_proposal_tools(mcp: FastMCP, context: MCPToolContext, proposals: Pr
             raise ApprovalError("proposal_not_found", "Bu proposal_id bu baglantiya ait degil veya bulunamadi.")
         return _proposal_to_dict(proposal)
 
-    for tool_name in ("prepare_proposal", "get_proposal"):
+    @mcp.tool(title="Bekleyen önerileri listele", annotations=READ_ONLY_LOCAL, structured_output=False)
+    def list_proposals(
+        ctx: Context,
+        customer_id: str | None = None,
+        limit: int = DEFAULT_LIST_LIMIT,
+    ) -> dict[str, Any]:
+        """Return pending human-review proposals owned by the caller's connector principal.
+
+        ``customer_id`` is optional, but when supplied it is still checked
+        against the caller's linked account list so enumeration attempts get the
+        same fail-closed behavior as proposal creation and reporting tools.
+        """
+        principal_id = authenticated_principal_id(ctx)
+        if customer_id is not None:
+            validate_customer_id(customer_id)
+            _verify_account_ownership(context, principal_id, customer_id)
+        if not (1 <= limit <= MAX_LIST_LIMIT):
+            raise ApprovalError("invalid_limit", f"limit 1 ile {MAX_LIST_LIMIT} arasinda olmalidir.")
+        return {
+            "proposals": [
+                _proposal_to_dict(proposal)
+                for proposal in proposals.list_pending(principal_id, customer_id=customer_id, limit=limit)
+            ]
+        }
+
+    for tool_name in ("prepare_proposal", "get_proposal", "list_proposals"):
         close_input_schema(mcp, tool_name)

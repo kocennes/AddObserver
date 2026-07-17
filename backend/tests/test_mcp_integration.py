@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -24,7 +26,7 @@ import httpx
 from cryptography.fernet import Fernet
 from google.ads.googleads.v24.services.types.google_ads_service import SearchGoogleAdsResponse
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from backend.src.api.reporting import FakeGoogleAdsSearchService, GoogleAdsReportingClient
 from backend.src.app import create_app
@@ -50,16 +52,18 @@ def _settings() -> Settings:
     )
 
 
-def _http_client_factory(app):
-    def factory(headers=None, timeout=None, auth=None):
-        return httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url=PUBLIC_BASE_URL,
-            headers=dict(headers or {}),
-            timeout=timeout or 30,
-        )
-
-    return factory
+@asynccontextmanager
+async def _mcp_session(app, *, token: str) -> AsyncIterator[ClientSession]:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url=PUBLIC_BASE_URL,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
+    ) as client:
+        async with streamable_http_client(f"{PUBLIC_BASE_URL}/mcp", http_client=client) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                yield session
 
 
 class MCPIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -104,14 +108,8 @@ class MCPIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self._issue_access_token(app, settings, principal_id=principal.id, token=token)
 
         async with app.router.lifespan_context(app):
-            async with streamablehttp_client(
-                f"{PUBLIC_BASE_URL}/mcp",
-                headers={"Authorization": f"Bearer {token}"},
-                httpx_client_factory=_http_client_factory(app),
-            ) as (read, write, _):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    tools = (await session.list_tools()).tools
+            async with _mcp_session(app, token=token) as session:
+                tools = (await session.list_tools()).tools
 
         names = {tool.name for tool in tools}
         read_only_names = {
@@ -120,6 +118,7 @@ class MCPIntegrationTests(unittest.IsolatedAsyncioTestCase):
             "get_ad_group_performance",
             "get_keyword_performance",
             "get_proposal",
+            "list_proposals",
         }
         local_write_names = {"prepare_proposal"}
         self.assertEqual(names, read_only_names | local_write_names)
@@ -150,18 +149,12 @@ class MCPIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self._issue_access_token(app, settings, principal_id=principal.id, token=token)
 
         async with app.router.lifespan_context(app):
-            async with streamablehttp_client(
-                f"{PUBLIC_BASE_URL}/mcp",
-                headers={"Authorization": f"Bearer {token}"},
-                httpx_client_factory=_http_client_factory(app),
-            ) as (read, write, _):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    accounts_result = await session.call_tool("list_accessible_accounts", {})
-                    campaign_result = await session.call_tool(
-                        "get_campaign_performance",
-                        {"customer_id": "1234567890", "start_date": "2026-07-01", "end_date": "2026-07-10"},
-                    )
+            async with _mcp_session(app, token=token) as session:
+                accounts_result = await session.call_tool("list_accessible_accounts", {})
+                campaign_result = await session.call_tool(
+                    "get_campaign_performance",
+                    {"customer_id": "1234567890", "start_date": "2026-07-01", "end_date": "2026-07-10"},
+                )
 
         self.assertFalse(accounts_result.isError)
         self.assertIn('"customer_id": "1234567890"', accounts_result.content[0].text)
@@ -185,17 +178,11 @@ class MCPIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self._issue_access_token(app, settings, principal_id=attacker.id, token=attacker_token)
 
         async with app.router.lifespan_context(app):
-            async with streamablehttp_client(
-                f"{PUBLIC_BASE_URL}/mcp",
-                headers={"Authorization": f"Bearer {attacker_token}"},
-                httpx_client_factory=_http_client_factory(app),
-            ) as (read, write, _):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    result = await session.call_tool(
-                        "get_campaign_performance",
-                        {"customer_id": "1234567890", "start_date": "2026-07-01", "end_date": "2026-07-10"},
-                    )
+            async with _mcp_session(app, token=attacker_token) as session:
+                result = await session.call_tool(
+                    "get_campaign_performance",
+                    {"customer_id": "1234567890", "start_date": "2026-07-01", "end_date": "2026-07-10"},
+                )
 
         self.assertTrue(result.isError)
         text = result.content[0].text
@@ -211,27 +198,21 @@ class MCPIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self._issue_access_token(app, settings, principal_id=principal.id, token=token)
 
         async with app.router.lifespan_context(app):
-            async with streamablehttp_client(
-                f"{PUBLIC_BASE_URL}/mcp",
-                headers={"Authorization": f"Bearer {token}"},
-                httpx_client_factory=_http_client_factory(app),
-            ) as (read, write, _):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    prepared = await session.call_tool(
-                        "prepare_proposal",
-                        {
-                            "customer_id": "1234567890",
-                            "proposal_type": "campaign_budget_update",
-                            "campaign_id": "5555",
-                            "rationale": "Son 30 gunde ROAS hedefin uzerinde, butce artisi oneriliyor.",
-                            "current_budget_amount_micros": 5_000_000,
-                            "proposed_budget_amount_micros": 8_000_000,
-                        },
-                    )
-                    self.assertFalse(prepared.isError)
-                    created = json.loads(prepared.content[0].text)
-                    fetched = await session.call_tool("get_proposal", {"proposal_id": created["proposal_id"]})
+            async with _mcp_session(app, token=token) as session:
+                prepared = await session.call_tool(
+                    "prepare_proposal",
+                    {
+                        "customer_id": "1234567890",
+                        "proposal_type": "campaign_budget_update",
+                        "campaign_id": "5555",
+                        "rationale": "Son 30 gunde ROAS hedefin uzerinde, butce artisi oneriliyor.",
+                        "current_budget_amount_micros": 5_000_000,
+                        "proposed_budget_amount_micros": 8_000_000,
+                    },
+                )
+                self.assertFalse(prepared.isError)
+                created = json.loads(prepared.content[0].text)
+                fetched = await session.call_tool("get_proposal", {"proposal_id": created["proposal_id"]})
 
         self.assertEqual(created["status"], "pending_approval")
         self.assertEqual(created["customer_id"], "1234567890")
@@ -239,6 +220,120 @@ class MCPIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(fetched.isError)
         fetched_body = json.loads(fetched.content[0].text)
         self.assertEqual(fetched_body, created)
+
+    async def test_get_proposal_reports_time_expired_pending_proposal(self) -> None:
+        settings, app = self._build_app()
+        conn = app.state.auth_context.conn
+        principal = PrincipalRepository(conn).get_or_create("https://accounts.google.com", "sub-1")
+        AdsAccountRepository(conn).link_account(principal.id, "1234567890", None)
+        token = "token-1"
+        self._issue_access_token(app, settings, principal_id=principal.id, token=token)
+
+        async with app.router.lifespan_context(app):
+            async with _mcp_session(app, token=token) as session:
+                prepared = await session.call_tool(
+                    "prepare_proposal",
+                    {
+                        "customer_id": "1234567890",
+                        "proposal_type": "campaign_pause",
+                        "campaign_id": "5555",
+                        "rationale": "Performans dusuk.",
+                        "current_status": "ENABLED",
+                    },
+                )
+                self.assertFalse(prepared.isError)
+                created = json.loads(prepared.content[0].text)
+                conn.execute(
+                    "UPDATE proposal SET expires_at = ? WHERE id = ?",
+                    (
+                        (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+                        created["proposal_id"],
+                    ),
+                )
+                conn.commit()
+                fetched = await session.call_tool("get_proposal", {"proposal_id": created["proposal_id"]})
+
+        self.assertFalse(fetched.isError)
+        self.assertEqual(json.loads(fetched.content[0].text)["status"], "expired")
+
+    async def test_list_proposals_returns_only_callers_pending_proposals(self) -> None:
+        settings, app = self._build_app()
+        conn = app.state.auth_context.conn
+        owner = PrincipalRepository(conn).get_or_create("https://accounts.google.com", "sub-owner")
+        AdsAccountRepository(conn).link_account(owner.id, "1234567890", None)
+        AdsAccountRepository(conn).link_account(owner.id, "2222222222", None)
+        owner_token = "owner-token"
+        self._issue_access_token(app, settings, principal_id=owner.id, token=owner_token)
+
+        other = PrincipalRepository(conn).get_or_create("https://accounts.google.com", "sub-other")
+        AdsAccountRepository(conn).link_account(other.id, "1234567890", None)
+        other_token = "other-token"
+        self._issue_access_token(app, settings, principal_id=other.id, token=other_token)
+
+        async with app.router.lifespan_context(app):
+            async with _mcp_session(app, token=owner_token) as session:
+                first = await session.call_tool(
+                    "prepare_proposal",
+                    {
+                        "customer_id": "1234567890",
+                        "proposal_type": "campaign_pause",
+                        "campaign_id": "5555",
+                        "rationale": "Performans dusuk.",
+                        "current_status": "ENABLED",
+                    },
+                )
+                second = await session.call_tool(
+                    "prepare_proposal",
+                    {
+                        "customer_id": "2222222222",
+                        "proposal_type": "campaign_enable",
+                        "campaign_id": "6666",
+                        "rationale": "Kampanya yeniden acilmaya hazir.",
+                        "current_status": "PAUSED",
+                    },
+                )
+                owner_list = await session.call_tool("list_proposals", {})
+                filtered_list = await session.call_tool("list_proposals", {"customer_id": "2222222222", "limit": 1})
+
+            async with _mcp_session(app, token=other_token) as session:
+                other_list = await session.call_tool("list_proposals", {})
+
+        self.assertFalse(first.isError)
+        self.assertFalse(second.isError)
+        self.assertFalse(owner_list.isError)
+        self.assertFalse(filtered_list.isError)
+        owner_body = json.loads(owner_list.content[0].text)
+        self.assertEqual(
+            [proposal["proposal_id"] for proposal in owner_body["proposals"]],
+            [
+                json.loads(first.content[0].text)["proposal_id"],
+                json.loads(second.content[0].text)["proposal_id"],
+            ],
+        )
+        filtered_body = json.loads(filtered_list.content[0].text)
+        self.assertEqual(
+            [proposal["proposal_id"] for proposal in filtered_body["proposals"]],
+            [json.loads(second.content[0].text)["proposal_id"]],
+        )
+        self.assertFalse(other_list.isError)
+        self.assertEqual(json.loads(other_list.content[0].text), {"proposals": []})
+
+    async def test_list_proposals_rejects_unlinked_customer_filter(self) -> None:
+        settings, app = self._build_app()
+        conn = app.state.auth_context.conn
+        principal = PrincipalRepository(conn).get_or_create("https://accounts.google.com", "sub-1")
+        token = "token-1"
+        self._issue_access_token(app, settings, principal_id=principal.id, token=token)
+
+        async with app.router.lifespan_context(app):
+            async with _mcp_session(app, token=token) as session:
+                result = await session.call_tool("list_proposals", {"customer_id": "1234567890"})
+                invalid_limit = await session.call_tool("list_proposals", {"limit": 101})
+
+        self.assertTrue(result.isError)
+        self.assertIn("baglanti", result.content[0].text.lower())
+        self.assertTrue(invalid_limit.isError)
+        self.assertIn("limit", invalid_limit.content[0].text)
 
     async def test_prepare_proposal_rejects_unlinked_customer_id(self) -> None:
         settings, app = self._build_app()
@@ -248,23 +343,17 @@ class MCPIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self._issue_access_token(app, settings, principal_id=principal.id, token=token)
 
         async with app.router.lifespan_context(app):
-            async with streamablehttp_client(
-                f"{PUBLIC_BASE_URL}/mcp",
-                headers={"Authorization": f"Bearer {token}"},
-                httpx_client_factory=_http_client_factory(app),
-            ) as (read, write, _):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    result = await session.call_tool(
-                        "prepare_proposal",
-                        {
-                            "customer_id": "1234567890",
-                            "proposal_type": "campaign_pause",
-                            "campaign_id": "5555",
-                            "rationale": "Kampanya butcesini asiyor.",
-                            "current_status": "ENABLED",
-                        },
-                    )
+            async with _mcp_session(app, token=token) as session:
+                result = await session.call_tool(
+                    "prepare_proposal",
+                    {
+                        "customer_id": "1234567890",
+                        "proposal_type": "campaign_pause",
+                        "campaign_id": "5555",
+                        "rationale": "Kampanya butcesini asiyor.",
+                        "current_status": "ENABLED",
+                    },
+                )
 
         self.assertTrue(result.isError)
         self.assertIn("baglanti", result.content[0].text.lower())
@@ -278,22 +367,16 @@ class MCPIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self._issue_access_token(app, settings, principal_id=principal.id, token=token)
 
         async with app.router.lifespan_context(app):
-            async with streamablehttp_client(
-                f"{PUBLIC_BASE_URL}/mcp",
-                headers={"Authorization": f"Bearer {token}"},
-                httpx_client_factory=_http_client_factory(app),
-            ) as (read, write, _):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    result = await session.call_tool(
-                        "prepare_proposal",
-                        {
-                            "customer_id": "1234567890",
-                            "proposal_type": "create_new_campaign",
-                            "campaign_id": "5555",
-                            "rationale": "Yeni kampanya olustur.",
-                        },
-                    )
+            async with _mcp_session(app, token=token) as session:
+                result = await session.call_tool(
+                    "prepare_proposal",
+                    {
+                        "customer_id": "1234567890",
+                        "proposal_type": "create_new_campaign",
+                        "campaign_id": "5555",
+                        "rationale": "Yeni kampanya olustur.",
+                    },
+                )
 
         self.assertTrue(result.isError)
         self.assertIn("proposal_type", result.content[0].text)
@@ -311,33 +394,21 @@ class MCPIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self._issue_access_token(app, settings, principal_id=attacker.id, token=attacker_token)
 
         async with app.router.lifespan_context(app):
-            async with streamablehttp_client(
-                f"{PUBLIC_BASE_URL}/mcp",
-                headers={"Authorization": f"Bearer {owner_token}"},
-                httpx_client_factory=_http_client_factory(app),
-            ) as (read, write, _):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    prepared = await session.call_tool(
-                        "prepare_proposal",
-                        {
-                            "customer_id": "1234567890",
-                            "proposal_type": "campaign_pause",
-                            "campaign_id": "5555",
-                            "rationale": "Performans dusuk.",
-                            "current_status": "ENABLED",
-                        },
-                    )
+            async with _mcp_session(app, token=owner_token) as session:
+                prepared = await session.call_tool(
+                    "prepare_proposal",
+                    {
+                        "customer_id": "1234567890",
+                        "proposal_type": "campaign_pause",
+                        "campaign_id": "5555",
+                        "rationale": "Performans dusuk.",
+                        "current_status": "ENABLED",
+                    },
+                )
             proposal_id = json.loads(prepared.content[0].text)["proposal_id"]
 
-            async with streamablehttp_client(
-                f"{PUBLIC_BASE_URL}/mcp",
-                headers={"Authorization": f"Bearer {attacker_token}"},
-                httpx_client_factory=_http_client_factory(app),
-            ) as (read, write, _):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    result = await session.call_tool("get_proposal", {"proposal_id": proposal_id})
+            async with _mcp_session(app, token=attacker_token) as session:
+                result = await session.call_tool("get_proposal", {"proposal_id": proposal_id})
 
         self.assertTrue(result.isError)
         self.assertIn("proposal_id", result.content[0].text)

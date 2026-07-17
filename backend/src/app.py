@@ -14,11 +14,15 @@ server actually starts.
 
 from __future__ import annotations
 
+import re
+import uuid
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 import httpx
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
 from .api.reporting import GoogleAdsReportingClient
 from .auth.approvals_routes import router as approvals_router
@@ -34,6 +38,187 @@ from .mcp.server import build_mcp_server, wrap_with_principal_auth
 #: ``adwords`` (docs/AUTH.md): this flow only proves "this browser belongs to
 #: principal X", it never re-authorizes or touches Google Ads access.
 _LOGIN_ONLY_SCOPES = tuple(scope for scope in GOOGLE_SCOPES if scope != "https://www.googleapis.com/auth/adwords")
+MAX_REQUEST_BODY_BYTES = 1_048_576
+CORRELATION_ID_HEADER = b"x-correlation-id"
+CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+SECURITY_RESPONSE_HEADERS = {
+    b"cache-control": b"no-store",
+    b"content-security-policy": (
+        b"default-src 'none'; "
+        b"base-uri 'none'; "
+        b"form-action 'self'; "
+        b"frame-ancestors 'none'; "
+        b"object-src 'none'; "
+        b"script-src 'none'"
+    ),
+    b"referrer-policy": b"no-referrer",
+    b"x-content-type-options": b"nosniff",
+}
+
+
+def _problem_response(
+    *,
+    status_code: int,
+    title: str,
+    detail: str,
+    code: str,
+    correlation_id: str | None = None,
+) -> JSONResponse:
+    content: dict[str, object] = {
+        "type": "about:blank",
+        "title": title,
+        "status": status_code,
+        "detail": detail,
+        "code": code,
+    }
+    if correlation_id is not None:
+        content["correlation_id"] = correlation_id
+    return JSONResponse(
+        status_code=status_code,
+        media_type="application/problem+json",
+        content=content,
+    )
+
+
+def _correlation_id_from_scope(scope: dict[str, Any]) -> str:
+    correlation_id = scope.get("correlation_id")
+    if isinstance(correlation_id, str) and correlation_id:
+        return correlation_id
+    return str(uuid.uuid4())
+
+
+class RequestBodyLimitMiddleware:
+    """Bound public HTTP request bodies even when the client omits Content-Length."""
+
+    def __init__(self, app: Callable[..., Awaitable[None]], *, max_body_bytes: int) -> None:
+        self._app = app
+        self._max_body_bytes = max_body_bytes
+
+    async def __call__(self, scope: dict[str, Any], receive: Callable[[], Awaitable[dict]], send: Callable) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+
+        headers = {key.lower(): value for key, value in scope.get("headers", [])}
+        content_length = headers.get(b"content-length")
+        if content_length is not None:
+            try:
+                body_size = int(content_length.decode("ascii"))
+            except ValueError:
+                await _problem_response(
+                    status_code=400,
+                    title="Invalid Content-Length",
+                    detail="Content-Length basligi gecerli bir tamsayi olmalidir.",
+                    code="invalid_content_length",
+                    correlation_id=_correlation_id_from_scope(scope),
+                )(scope, receive, send)
+                return
+            if body_size > self._max_body_bytes:
+                await _problem_response(
+                    status_code=413,
+                    title="Request body too large",
+                    detail=f"Istek govdesi en fazla {self._max_body_bytes} bayt olabilir.",
+                    code="request_body_too_large",
+                    correlation_id=_correlation_id_from_scope(scope),
+                )(scope, receive, send)
+                return
+
+        body_size = 0
+        response_started = False
+
+        async def limited_receive() -> dict[str, Any]:
+            nonlocal body_size
+            message = await receive()
+            if message["type"] == "http.request":
+                body_size += len(message.get("body", b""))
+                if body_size > self._max_body_bytes:
+                    raise RequestBodyTooLarge
+            return message
+
+        async def tracking_send(message: dict[str, Any]) -> None:
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self._app(scope, limited_receive, tracking_send)
+        except RequestBodyTooLarge:
+            if response_started:
+                raise
+            await _problem_response(
+                status_code=413,
+                title="Request body too large",
+                detail=f"Istek govdesi en fazla {self._max_body_bytes} bayt olabilir.",
+                code="request_body_too_large",
+                correlation_id=_correlation_id_from_scope(scope),
+            )(scope, receive, send)
+
+
+class RequestBodyTooLarge(Exception):
+    """Raised when a streamed request body crosses the configured ingress limit."""
+
+
+class CorrelationIdMiddleware:
+    """Ensure every HTTP response has a safe correlation ID for support and logs."""
+
+    def __init__(self, app: Callable[..., Awaitable[None]]) -> None:
+        self._app = app
+
+    async def __call__(self, scope: dict[str, Any], receive: Callable[[], Awaitable[dict]], send: Callable) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+
+        incoming = None
+        for key, value in scope.get("headers", []):
+            if key.lower() == CORRELATION_ID_HEADER:
+                try:
+                    decoded = value.decode("ascii")
+                except UnicodeDecodeError:
+                    decoded = ""
+                if CORRELATION_ID_PATTERN.fullmatch(decoded):
+                    incoming = decoded
+                break
+        correlation_id = incoming or str(uuid.uuid4())
+        scope["correlation_id"] = correlation_id
+
+        async def send_with_correlation_id(message: dict[str, Any]) -> None:
+            if message["type"] == "http.response.start":
+                headers = [
+                    (key, value)
+                    for key, value in message.get("headers", [])
+                    if key.lower() != CORRELATION_ID_HEADER
+                ]
+                headers.append((CORRELATION_ID_HEADER, correlation_id.encode("ascii")))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self._app(scope, receive, send_with_correlation_id)
+
+
+class SecurityHeadersMiddleware:
+    """Attach conservative browser security headers to every public HTTP response."""
+
+    def __init__(self, app: Callable[..., Awaitable[None]]) -> None:
+        self._app = app
+
+    async def __call__(self, scope: dict[str, Any], receive: Callable[[], Awaitable[dict]], send: Callable) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+
+        async def send_with_security_headers(message: dict[str, Any]) -> None:
+            if message["type"] == "http.response.start":
+                existing = {key.lower() for key, _ in message.get("headers", [])}
+                headers = list(message.get("headers", []))
+                for key, value in SECURITY_RESPONSE_HEADERS.items():
+                    if key not in existing:
+                        headers.append((key, value))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self._app(scope, receive, send_with_security_headers)
 
 
 def create_app(
@@ -84,11 +269,17 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        async with mcp_server.session_manager.run():
-            yield
-        http_client.close()
+        try:
+            async with mcp_server.session_manager.run():
+                yield
+        finally:
+            http_client.close()
+            conn.close()
 
     app = FastAPI(title="AddObserver connector", lifespan=lifespan)
+    app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=MAX_REQUEST_BODY_BYTES)
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(CorrelationIdMiddleware)
     app.state.auth_context = AuthContext(
         settings=settings,
         conn=conn,
@@ -99,5 +290,20 @@ def create_app(
     )
     app.include_router(auth_router)
     app.include_router(approvals_router)
+
+    @app.get("/healthz")
+    async def healthz() -> dict[str, str]:
+        """Liveness probe: process is up and able to answer HTTP."""
+        return {"status": "ok"}
+
+    @app.get("/readyz")
+    async def readyz() -> JSONResponse:
+        """Readiness probe: required local dependencies are reachable."""
+        try:
+            conn.execute("SELECT 1").fetchone()
+        except Exception:  # noqa: BLE001 -- readiness must not leak DB details
+            return JSONResponse(status_code=503, content={"status": "unavailable"})
+        return JSONResponse({"status": "ok"})
+
     app.mount("/", mcp_app)
     return app

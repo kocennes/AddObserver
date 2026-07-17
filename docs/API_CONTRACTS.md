@@ -27,6 +27,11 @@ edilebilir veri sözleşmelerini tanımlamak.
 - State-changing istekler `Idempotency-Key`, correlation ID ve yetkili kullanıcı gerektirir.
 - Zaman RFC 3339 UTC, para integer micros, ID'ler string olarak taşınır.
 - Hatalar kararlı `code`, güvenli `message`, `correlation_id` ve alan detayları döndürür; stack trace dönmez.
+  Her public HTTP response `X-Correlation-ID` taşır; güvenli client değeri korunur, geçersiz değer sanitize
+  edilip yeni opaque ID ile değiştirilir.
+- Public ingress request body sınırı 1 MiB'dir. `Content-Length` bu sınırı aşarsa handler çalışmadan
+  `413 application/problem+json` ve `code=request_body_too_large` döner. Başlık olmadan gelen streamed body
+  downstream okuma sırasında sınırı geçerse aynı `413` döner; geçersiz değer `400 invalid_content_length` olur.
 
 ## Önerilen HTTP kaynakları
 
@@ -88,5 +93,7 @@ Modelin gönderdiği `customer_id`, `resource_name`, `before` ve bütçe değeri
 
 ## Güncelleme geçmişi
 
+- 2026-07-17 — 1 MiB public ingress request body sınırı, streamed-body uygulaması ve hata kodları eklendi.
+- 2026-07-17 — `X-Correlation-ID` response header'ı ve problem response `correlation_id` sözleşmesi eklendi.
 - 2026-07-17 — Principal-scoped public connector ve Google Ads sözleşmeleri tanımlandı.
 - 2026-07-17 — Ürün sahibi onayıyla Kabul edildi durumuna geçirildi.

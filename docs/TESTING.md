@@ -1,4 +1,4 @@
-bak ba# Test stratejisi
+# Test stratejisi
 
 **Durum:** Kabul edildi  
 **Son gözden geçirme:** 2026-07-17
@@ -118,5 +118,12 @@ Kod, test, ilgili belge, migration/rollback ve gözlemlenebilirlik birlikte tesl
 - 2026-07-17 — Audit başlangıç kaydı başarısızken provider mutate çağrısının yapılmadığı ve belirsiz
   adapter hatasının kör retry yerine `unknown` execution ürettiği uygulama sınırı testleri eklendi.
 - 2026-07-17 — Approval domain için onaysız execution, cross-principal, değişmiş hash, expiry ve başarılı rezervasyon testleri eklendi.
+- 2026-07-17 — ASGI lifespan shutdown'ın sqlite bağlantısını kapattığı lifecycle testi eklendi; HTTP/app testleri
+  kapanış sonrası DB bağlantısına güvenmeyecek şekilde düzenlendi.
+- 2026-07-17 — Public ingress body sınırı için `/mcp` üzerinde 413/400 ve başlıksız streamed-body negatif lifecycle testleri eklendi.
+- 2026-07-17 — Public HTTP security header testi ve `/logout` CSRF pozitif/negatif testleri eklendi.
+- 2026-07-17 — `X-Correlation-ID` üretme/echo etme, sanitize etme ve problem response `correlation_id` testi eklendi.
+- 2026-07-17 — İnsan approval decision kaydının audit ile atomik yazıldığını ve audit hatasında rollback olduğunu doğrulayan testler eklendi.
+- 2026-07-17 — `/disconnect` audit kaydının kabul edilen HTTP correlation ID ile yazıldığını doğrulayan test eklendi.
 - 2026-07-17 — Bağımlılıksız ilk test runner'ı ve otomatik dokümantasyon kapısı tanımlandı.
 - 2026-07-17 — Güvenlik negatif testleri, mock politikası ve WCAG kalite kapıları tanımlandı; zorunlu belge formatı eklendi.

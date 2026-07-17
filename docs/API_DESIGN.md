@@ -35,7 +35,13 @@ sözleşmesini belirlemek. Endpoint kataloğunun ayrıntısı `API_CONTRACTS.md`
   Execution ham mutate body kabul etmez; yalnız onaylanmış proposal ID'sini uygular.
 - Hatalar RFC 9457 `application/problem+json`: `type`, `title`, `status`, güvenli `detail`, opaque `instance`,
   `code`, `correlation_id`, gerekirse güvenli field errors. Stack trace ve başka kullanıcı varlık bilgisi yoktur.
+- Her HTTP response `X-Correlation-ID` taşır. Client güvenli biçimde `X-Correlation-ID` verdiyse aynı değer
+  korunur; geçersiz/çok uzun değerler yansıtılmaz ve yeni opaque ID üretilir. Problem response gövdesi aynı
+  `correlation_id` değerini içerir.
 - Liste endpoint'leri bounded cursor pagination kullanır; kullanıcı kontrollü sort/filter allowlist'tir.
+- Public HTTP ingress request body üst sınırı 1 MiB'dir. Bu sınırı aşan `Content-Length` route/auth katmanına
+  ulaşmadan `413 application/problem+json` ile reddedilir; başlıksız streamed body aynı sınırı downstream
+  okuma sırasında geçerse yine `413` döner. Geçersiz `Content-Length` `400` döner.
 
 ### MCP tools
 
@@ -61,4 +67,6 @@ sözleşmesini belirlemek. Endpoint kataloğunun ayrıntısı `API_CONTRACTS.md`
 
 ## Güncelleme geçmişi
 
+- 2026-07-17 — Public HTTP ingress için 1 MiB request body sınırı ve güvenli problem response sözleşmesi eklendi.
+- 2026-07-17 — Public HTTP responses için `X-Correlation-ID` üretme/echo etme ve problem response korelasyonu eklendi.
 - 2026-07-17 — REST/RFC 9457 sözleşmesi, kapalı MCP şemaları ve proposal-only execution kararı tanımlandı.

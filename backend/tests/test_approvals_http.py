@@ -27,7 +27,7 @@ from backend.src.approval import Proposal, ProposalStatus, build_proposal_payloa
 from backend.src.auth.google_oauth import FakeGoogleOAuthClient
 from backend.src.auth.web_session import issue_web_session
 from backend.src.config import Settings
-from backend.src.db.proposals import ApprovalRepository, ProposalRepository
+from backend.src.db.proposals import ApprovalRepository, AuditRepository, ProposalRepository
 from backend.src.db.repository import AdsAccountRepository, OAuthCredentialRepository, PrincipalRepository
 from backend.src.db.web_session_store import WebSessionRepository
 
@@ -109,6 +109,7 @@ class ApprovalsHttpTests(unittest.IsolatedAsyncioTestCase):
                 page = await client.get("/approvals")
                 self.assertEqual(page.status_code, 200)
                 self.assertIn("campaign_pause", page.text)
+                self.assertNotIn("onsubmit=", page.text)
                 match = CSRF_RE.search(page.text)
                 assert match is not None
                 csrf_token = match.group(1)
@@ -116,16 +117,21 @@ class ApprovalsHttpTests(unittest.IsolatedAsyncioTestCase):
                 decision_response = await client.post(
                     "/approvals/proposal-1/decision",
                     data={"decision": "approve", "csrf_token": csrf_token},
+                    headers={"X-Correlation-ID": "approval-corr-1"},
                 )
                 self.assertEqual(decision_response.status_code, 302)
                 self.assertEqual(decision_response.headers["location"], "/approvals")
+                self.assertEqual(decision_response.headers["x-correlation-id"], "approval-corr-1")
 
-        updated = proposals.get(principal.id, "proposal-1")
-        assert updated is not None
-        self.assertEqual(updated.status, ProposalStatus.APPROVED)
-        approval = ApprovalRepository(conn).get_latest(principal.id, "proposal-1")
-        assert approval is not None
-        self.assertEqual(approval.decision.value, "approve")
+                updated = proposals.get(principal.id, "proposal-1")
+                assert updated is not None
+                self.assertEqual(updated.status, ProposalStatus.APPROVED)
+                approval = ApprovalRepository(conn).get_latest(principal.id, "proposal-1")
+                assert approval is not None
+                self.assertEqual(approval.decision.value, "approve")
+                events = AuditRepository(conn).list_for_principal(principal.id)
+                self.assertEqual(events[0].event_type, "approval.decided")
+                self.assertEqual(events[0].correlation_id, "approval-corr-1")
 
     async def test_login_never_creates_principal_or_touches_credential(self) -> None:
         _, app = self._build_app(login_subject="sub-never-connected")
@@ -137,9 +143,9 @@ class ApprovalsHttpTests(unittest.IsolatedAsyncioTestCase):
             ) as client:
                 callback_response = await self._login(client)
 
-        self.assertEqual(callback_response.status_code, 403)
-        self.assertNotIn("web_session", callback_response.cookies)
-        self.assertIsNone(PrincipalRepository(conn).get("https://accounts.google.com", "sub-never-connected"))
+                self.assertEqual(callback_response.status_code, 403)
+                self.assertNotIn("web_session", callback_response.cookies)
+                self.assertIsNone(PrincipalRepository(conn).get("https://accounts.google.com", "sub-never-connected"))
 
     async def test_login_does_not_rotate_existing_ads_credential(self) -> None:
         _, app = self._build_app(login_subject="sub-1")
@@ -155,10 +161,10 @@ class ApprovalsHttpTests(unittest.IsolatedAsyncioTestCase):
             ) as client:
                 await self._login(client)
 
-        credential = OAuthCredentialRepository(conn).get_active(principal.id)
-        assert credential is not None
-        self.assertEqual(credential.vault_ref, vault_ref)
-        self.assertEqual(vault.read(vault_ref), "real-google-refresh-token")
+                credential = OAuthCredentialRepository(conn).get_active(principal.id)
+                assert credential is not None
+                self.assertEqual(credential.vault_ref, vault_ref)
+                self.assertEqual(vault.read(vault_ref), "real-google-refresh-token")
 
     async def test_approvals_without_session_redirects_to_login(self) -> None:
         _, app = self._build_app()
@@ -196,10 +202,10 @@ class ApprovalsHttpTests(unittest.IsolatedAsyncioTestCase):
                 response = await client.post(
                     "/approvals/proposal-1/decision", data={"decision": "approve", "csrf_token": "wrong-token"}
                 )
-        self.assertEqual(response.status_code, 401)
-        updated = proposals.get(principal.id, "proposal-1")
-        assert updated is not None
-        self.assertEqual(updated.status, ProposalStatus.PENDING_APPROVAL)
+                self.assertEqual(response.status_code, 401)
+                updated = proposals.get(principal.id, "proposal-1")
+                assert updated is not None
+                self.assertEqual(updated.status, ProposalStatus.PENDING_APPROVAL)
 
     async def test_cross_principal_cannot_decide_other_principals_proposal(self) -> None:
         """Attacker has a genuinely valid session (correct cookie + CSRF) but a different
@@ -228,11 +234,11 @@ class ApprovalsHttpTests(unittest.IsolatedAsyncioTestCase):
                     "/approvals/proposal-1/decision",
                     data={"decision": "approve", "csrf_token": attacker_session.csrf_token},
                 )
-        self.assertEqual(response.status_code, 404)
-        # The proposal must still belong to, and only be decidable by, its owner.
-        updated = proposals.get(owner.id, "proposal-1")
-        assert updated is not None
-        self.assertEqual(updated.status, ProposalStatus.PENDING_APPROVAL)
+                self.assertEqual(response.status_code, 404)
+                # The proposal must still belong to, and only be decidable by, its owner.
+                updated = proposals.get(owner.id, "proposal-1")
+                assert updated is not None
+                self.assertEqual(updated.status, ProposalStatus.PENDING_APPROVAL)
 
     async def test_disconnect_revokes_credential_and_logs_out(self) -> None:
         _, app = self._build_app(login_subject="sub-1")
@@ -253,19 +259,26 @@ class ApprovalsHttpTests(unittest.IsolatedAsyncioTestCase):
                 assert match is not None
                 csrf_token = match.group(1)
 
-                response = await client.post("/disconnect", data={"csrf_token": csrf_token})
+                response = await client.post(
+                    "/disconnect",
+                    data={"csrf_token": csrf_token},
+                    headers={"X-Correlation-ID": "disconnect-corr-1"},
+                )
                 self.assertEqual(response.status_code, 302)
                 self.assertEqual(response.headers["location"], "/login")
+                self.assertEqual(response.headers["x-correlation-id"], "disconnect-corr-1")
 
                 # The now-revoked session cookie can no longer reach /approvals.
                 after = await client.get("/approvals")
                 self.assertEqual(after.status_code, 302)
                 self.assertEqual(after.headers["location"], "/login")
 
-        self.assertIsNone(OAuthCredentialRepository(conn).get_active(principal.id))
-        account = AdsAccountRepository(conn).get_account(principal.id, "1234567890")
-        assert account is not None
-        self.assertEqual(account.status, "disconnected")
+                self.assertIsNone(OAuthCredentialRepository(conn).get_active(principal.id))
+                account = AdsAccountRepository(conn).get_account(principal.id, "1234567890")
+                assert account is not None
+                self.assertEqual(account.status, "disconnected")
+                events = AuditRepository(conn).list_for_principal(principal.id)
+                self.assertEqual(events[0].correlation_id, "disconnect-corr-1")
 
     async def test_disconnect_without_session_is_unauthorized(self) -> None:
         _, app = self._build_app()
@@ -290,9 +303,48 @@ class ApprovalsHttpTests(unittest.IsolatedAsyncioTestCase):
             ) as client:
                 await self._login(client)
                 response = await client.post("/disconnect", data={"csrf_token": "wrong-token"})
-        self.assertEqual(response.status_code, 401)
-        # Nothing was revoked -- the credential must still be active.
-        self.assertIsNotNone(OAuthCredentialRepository(conn).get_active(principal.id))
+                self.assertEqual(response.status_code, 401)
+                # Nothing was revoked -- the credential must still be active.
+                self.assertIsNotNone(OAuthCredentialRepository(conn).get_active(principal.id))
+
+    async def test_logout_revokes_session_with_csrf(self) -> None:
+        _, app = self._build_app(login_subject="sub-1")
+        conn = app.state.auth_context.conn
+        PrincipalRepository(conn).get_or_create("https://accounts.google.com", "sub-1")
+
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url=PUBLIC_BASE_URL
+            ) as client:
+                await self._login(client)
+                page = await client.get("/approvals")
+                match = CSRF_RE.search(page.text)
+                assert match is not None
+                csrf_token = match.group(1)
+
+                response = await client.post("/logout", data={"csrf_token": csrf_token})
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response.headers["location"], "/login")
+
+                after = await client.get("/approvals")
+                self.assertEqual(after.status_code, 302)
+                self.assertEqual(after.headers["location"], "/login")
+
+    async def test_logout_rejects_wrong_csrf_token(self) -> None:
+        _, app = self._build_app(login_subject="sub-1")
+        conn = app.state.auth_context.conn
+        PrincipalRepository(conn).get_or_create("https://accounts.google.com", "sub-1")
+
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url=PUBLIC_BASE_URL
+            ) as client:
+                await self._login(client)
+                response = await client.post("/logout", data={"csrf_token": "wrong-token"})
+                self.assertEqual(response.status_code, 401)
+
+                still_logged_in = await client.get("/approvals")
+                self.assertEqual(still_logged_in.status_code, 200)
 
     async def test_replayed_login_state_is_rejected(self) -> None:
         _, app = self._build_app(login_subject="sub-1")

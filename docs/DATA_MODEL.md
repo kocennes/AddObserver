@@ -52,6 +52,8 @@ mantıksal varlıklarını ve yaşam döngüsünü tanımlamak.
   ve `backend/src/auth/disconnect.py`). Satır silinmez — `proposal`/`approval`/`audit_event` geçmişi
   `customer_id`'ye referans vermeye devam eder.
 - Execution yalnız `approved` öneriden başlar. `proposal_hash` veya mevcut Google değeri değişirse `stale` olur.
+- İnsan onay/red kararı `approval` satırıyla birlikte `approval.decided` audit_event'i üretir;
+  audit kaydı `proposal_id`, `approval_id`, `principal_id`, `customer_id` ve correlation ID taşır.
 
 ## İzolasyon ve bütünlük
 
@@ -78,6 +80,8 @@ mantıksal varlıklarını ve yaşam döngüsünü tanımlamak.
 
 - 2026-07-17 — `/approvals` insan onay yüzeyi için `web_login_state`/`web_session` varlıkları
   eklendi (docs/AUTH.md, docs/ARCHITECTURE.md).
+- 2026-07-17 — İnsan onay/red kararlarının `approval.decided` audit_event'i ile atomik yazılması
+  ve audit `approval_id` bağının kullanılması netleştirildi.
 - 2026-07-17 — Execution audit olaylarına uzlaştırma ve uçtan uca izlenebilirlik için
   `execution_id` alanı eklendi.
 - 2026-07-17 — İzolasyon kökü ajans tenant'ından public connector principal'ına çevrildi.

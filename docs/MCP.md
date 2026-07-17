@@ -72,15 +72,21 @@ token lifecycle ve Origin validation. Upstream Google token passthrough yasaktı
 | `list_accessible_accounts` | read-only, local | Hayır |
 | `get_campaign_performance` / `get_ad_group_performance` / `get_keyword_performance` | read-only | Hayır (okur) |
 | `prepare_proposal` | write, local, non-destructive | Hayır — yalnız `proposal` tablosuna taslak yazar |
-| `get_proposal` | read-only, local | Hayır |
+| `get_proposal` / `list_proposals` | read-only, local | Hayır |
 
 `prepare_proposal`'ın kabul ettiği `proposal_type` docs/PRODUCT.md Faz 1.1 allowlist'iyle birebir sınırlıdır
 (`campaign_pause`, `campaign_enable`, `campaign_budget_update` — bkz. `backend/src/approval/payload_schema.py`);
 onay/uygulama tool'u henüz yoktur.
+
+`get_proposal`, süresi dolmuş ama henüz kalıcı durum geçişi yazılmamış `pending_approval` önerilerini
+cevapta `expired` olarak gösterir. `list_proposals`, yalnız çağıranın `principal_id` kapsamındaki, süresi
+dolmamış `pending_approval` durumundaki önerileri döndürür. Opsiyonel `customer_id` filtresi verilirse
+hesap bağlantısı tekrar doğrulanır; `limit` 1-100 arasında sınırlıdır ve varsayılan 50'dir.
 
 ## Güncelleme geçmişi
 
 - 2026-07-17 — Remote directory auth, annotations ve cross-user izolasyon kuralları eklendi.
 - 2026-07-17 — Ürün sahibi onayıyla Kabul edildi durumuna geçirildi; review checklist kanıtları
   submission öncesi `CONNECTOR_SUBMISSION.md` üzerinden ayrıca tamamlanacak.
+- 2026-07-17 — `list_proposals` bekleyen, principal-scoped öneri görünürlüğü için eklendi.
 - 2026-07-17 — `prepare_proposal`/`get_proposal` uygulandı; ilk tool envanteri tablosu eklendi.

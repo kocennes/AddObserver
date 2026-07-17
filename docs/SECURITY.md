@@ -151,8 +151,12 @@ gereksinimleri uygulanır.
   anahtarı kullanır. CORS açık allowlist'tir.
   - Uygulama: `/approvals` (docs/AUTH.md "Approval-UI web girişi") -- session cookie
     `HttpOnly`+`SameSite=Strict`+(yerel ortam dışında) `Secure`; her karar POST'u ayrıca
-    session'dan bağımsız üretilmiş bir `csrf_token`'ı `secrets.compare_digest` ile doğrular
-    (synchronizer token deseni). Token değerleri yalnız SHA-256 hash'i olarak saklanır.
+    session'dan bağımsız üretilmiş bir `csrf_token`'ı `secrets.compare_digest` ile doğrular;
+    `/logout` ve `/disconnect` aynı synchronizer token desenini kullanır. Token değerleri
+    yalnız SHA-256 hash'i olarak saklanır.
+- Public HTTP cevapları varsayılan olarak `Cache-Control: no-store`, `Referrer-Policy: no-referrer`,
+  `X-Content-Type-Options: nosniff` ve form-only katı CSP (`default-src 'none'`, `script-src 'none'`,
+  `form-action 'self'`, `frame-ancestors 'none'`) taşır.
 - Hata cevapları secret, SQL, stack trace veya başka kullanıcı/hesap varlığını açığa çıkarmaz.
 - Bağımlılıklar kilitlenir, düzenli taranır ve desteklenen sürümlerde tutulur.
 
@@ -164,6 +168,9 @@ gereksinimleri uygulanır.
   sahip olmalıdır; normal uygulama rolü geçmiş audit olayını güncelleyemez.
 - Zorunlu alanlar: UTC zaman, event type, actor/service/principal, customer, proposal/approval, correlation,
   outcome, reason code ve varsa Google request ID.
+- İnsan onay/red kararı state-changing write sayılır; proposal status, `approval` satırı ve
+  `approval.decided` audit_event'i aynı transaction içinde yazılır. Audit yazılamazsa karar
+  fail-closed kalır.
 - Token, secret, authorization header, cookie, tam prompt, gereksiz PII ve ödeme verisi loglanmaz.
 - Saatler senkronize edilir; erişim, export ve retention işlemleri audit edilir.
 - Retention süresi hukuk/iş ihtiyacıyla üretim öncesi kararlaştırılır (`TBD`); süresiz saklama varsayılmaz.
@@ -189,6 +196,7 @@ gereksinimleri uygulanır.
 
 - 2026-07-17 — `/approvals` insan onay yüzeyi için CSRF token + cookie özniteliği kararı eklendi
   (docs/AUTH.md).
+- 2026-07-17 — Public HTTP güvenlik header'ları ve `/logout` CSRF doğrulaması uygulama standardına eklendi.
 - 2026-07-17 — 2026 Google OAuth/Ads, MCP ve OWASP kaynaklarıyla ilk güvenlik standardı oluşturuldu;
   belge zorunlu araştırma/karar formatına getirildi.
 - 2026-07-17 — Restricted `adwords` scope, production verification/security assessment, developer-token

@@ -139,6 +139,37 @@ class DisconnectPrincipalTests(unittest.TestCase):
         self.assertEqual(events[0].event_type, "principal.disconnected")
         self.assertEqual(events[0].outcome, "revoked")
 
+    def test_disconnect_uses_supplied_correlation_id(self) -> None:
+        self._link_and_store_credential()
+        disconnect_principal(
+            self.principal.id,
+            tokens=self.tokens,
+            credentials=self.credentials,
+            accounts=self.accounts,
+            vault=self.vault,
+            audit=self.audit,
+            now=NOW,
+            correlation_id="support-corr-1",
+        )
+        events = self.audit.list_for_principal(self.principal.id)
+        self.assertEqual(events[0].correlation_id, "support-corr-1")
+
+    def test_disconnect_replaces_unsafe_correlation_id(self) -> None:
+        self._link_and_store_credential()
+        disconnect_principal(
+            self.principal.id,
+            tokens=self.tokens,
+            credentials=self.credentials,
+            accounts=self.accounts,
+            vault=self.vault,
+            audit=self.audit,
+            now=NOW,
+            correlation_id="bad value with spaces",
+        )
+        events = self.audit.list_for_principal(self.principal.id)
+        self.assertRegex(events[0].correlation_id, r"^[A-Za-z0-9._-]{1,128}$")
+        self.assertNotEqual(events[0].correlation_id, "bad value with spaces")
+
     def test_disconnect_is_idempotent(self) -> None:
         """A second disconnect (e.g. a double-submitted form) must not error."""
         self._link_and_store_credential()

@@ -36,6 +36,8 @@ tanımlamak.
 
 ## Gözlemlenebilirlik
 
+- Health/readiness: `/healthz` yalnız process liveness için `{"status":"ok"}` döndürür; `/readyz` DB erişimini
+  doğrular ve bağımlılık kullanılamıyorsa secret/stack trace sızdırmadan `503 {"status":"unavailable"}` verir.
 - Metrikler: analiz başarı/gecikme, pending approval yaşı, execution sonucu, Google hata sınıfı,
   quota/rate limit, queue depth, stale proposal ve audit yazma hatası.
 - Trace/log correlation ID taşır; principal/customer değerleri erişim kontrollü metadata olur.
@@ -98,3 +100,4 @@ tanımlamak.
 
 - 2026-07-17 — Public connector submission/availability ve principal izolasyon operasyonları eklendi.
 - 2026-07-17 — Ürün sahibi onayıyla Kabul edildi durumuna geçirildi.
+- 2026-07-17 — `/healthz` liveness ve `/readyz` DB readiness endpoint sözleşmesi eklendi.

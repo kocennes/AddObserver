@@ -10,6 +10,7 @@ scope and never touches the stored Ads credential (see that module's docstring).
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from html import escape
 from typing import Optional
@@ -18,6 +19,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ..approval import ApprovalError, Decision, Proposal, approve_proposal
+from ..db.models import AuditEvent
 from ..db.oauth_store import TokenRepository
 from ..db.proposals import ApprovalRepository, AuditRepository, ProposalRepository
 from ..db.repository import AdsAccountRepository, OAuthCredentialRepository, PrincipalRepository
@@ -136,6 +138,11 @@ def _proposal_summary(proposal: Proposal) -> str:
     return f"{proposal_type} / kampanya {campaign_id}"
 
 
+def _request_correlation_id(request: Request) -> str | None:
+    correlation_id = request.scope.get("correlation_id")
+    return correlation_id if isinstance(correlation_id, str) and correlation_id else None
+
+
 @router.get("/approvals")
 async def list_approvals(request: Request, context: AuthContext = Depends(get_context)):
     """Render the caller's pending proposals with per-row, action-labelled approve/reject forms."""
@@ -165,10 +172,11 @@ async def list_approvals(request: Request, context: AuthContext = Depends(get_co
     body = (
         "<h1>Bekleyen öneriler</h1>"
         f"<ul>{''.join(rows) if rows else '<li>Bekleyen öneri yok.</li>'}</ul>"
-        '<form method="post" action="/logout"><button type="submit">Çıkış yap</button></form>'
-        '<form method="post" action="/disconnect" '
-        'onsubmit="return confirm(\'Bağlantıyı kesmek geri alınamaz: Google erişimi ve bağlı '
-        'hesaplar iptal edilir. Emin misiniz?\');">'
+        '<form method="post" action="/logout">'
+        f'<input type="hidden" name="csrf_token" value="{csrf}" />'
+        '<button type="submit">Çıkış yap</button>'
+        "</form>"
+        '<form method="post" action="/disconnect">'
         f'<input type="hidden" name="csrf_token" value="{csrf}" />'
         '<button type="submit">Bağlantıyı kes (disconnect)</button>'
         "</form>"
@@ -202,6 +210,7 @@ async def disconnect(
         vault=context.vault,
         audit=AuditRepository(context.conn),
         now=datetime.now(timezone.utc),
+        correlation_id=_request_correlation_id(request),
     )
 
     raw_token = request.cookies.get("web_session")
@@ -250,16 +259,43 @@ async def decide_proposal(
     except ApprovalError as error:
         return _error_page("Karar kaydedilemedi", str(error), 400)
 
-    proposals.save(updated_proposal)
-    ApprovalRepository(context.conn).save(approval)
+    ApprovalRepository(context.conn).save_decision_with_audit(
+        updated_proposal,
+        approval,
+        AuditEvent(
+            event_id=str(uuid.uuid4()),
+            occurred_at=now,
+            actor=session.principal_id,
+            principal_id=session.principal_id,
+            customer_id=proposal.customer_id,
+            event_type="approval.decided",
+            proposal_id=proposal.proposal_id,
+            approval_id=None,
+            execution_id=None,
+            outcome=decision_enum.value,
+            reason_code=None,
+            correlation_id=_request_correlation_id(request) or str(uuid.uuid4()),
+            google_request_id=None,
+        ),
+    )
     return RedirectResponse(url="/approvals", status_code=302)
 
 
 @router.post("/logout")
-async def logout(request: Request, context: AuthContext = Depends(get_context)) -> RedirectResponse:
+async def logout(
+    request: Request,
+    csrf_token: str = Form(...),
+    context: AuthContext = Depends(get_context),
+):
+    try:
+        session = _require_session(request, context)
+        verify_csrf_token(csrf_token, session.csrf_token)
+    except AuthError as error:
+        return _error_page("Yetkisiz", str(error), 401)
+
     raw_token = request.cookies.get("web_session")
-    if raw_token:
-        WebSessionRepository(context.conn).revoke(raw_token)
+    assert raw_token is not None
+    WebSessionRepository(context.conn).revoke(raw_token)
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie("web_session", path="/")
     return response

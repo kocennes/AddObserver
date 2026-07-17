@@ -55,6 +55,8 @@ Connector Authorization Server                    ▼
   gerekli Anthropic-facing callback/metadata ve allowlist telemetry hedefleriyle sınırlıdır.
 - Uygulama kendi Anthropic API'sine reklam verisi göndermez; analiz Claude kullanıcısının connector tool
   sonuçları üzerinden gerçekleşir. Bu ayrım veri akışı ve maliyet modelini sadeleştirir.
+- ASGI uygulama yaşam döngüsü MCP session manager'ı başlatır/durdurur ve shutdown sırasında yerel HTTP client ile
+  sqlite bağlantısını kapatır; testler shutdown sonrası repository erişimine güvenmez.
 
 ## Bileşenler
 
@@ -86,4 +88,6 @@ Connector Authorization Server                    ▼
   `/approvals` (docs/AUTH.md). "Claude dışında ayrı onboarding/account-management web UI
   kapsamı" açık sorusu kapatıldı; yerine daha zengin bir dashboard'un gerekip gerekmediği
   sorusu eklendi.
+- 2026-07-17 — ASGI shutdown sırasında HTTP client ve sqlite bağlantısının deterministik kapatıldığı
+  lifecycle sözleşmesi eklendi.
 

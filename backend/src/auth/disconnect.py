@@ -16,6 +16,7 @@ audit yerine gecmez").
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -25,6 +26,8 @@ from ..db.oauth_store import TokenRepository
 from ..db.proposals import AuditRepository
 from ..db.repository import AdsAccountRepository, OAuthCredentialRepository
 from .vault import VaultClient
+
+_CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +45,7 @@ def disconnect_principal(
     vault: VaultClient,
     audit: AuditRepository,
     now: datetime,
+    correlation_id: str | None = None,
 ) -> DisconnectResult:
     """Revoke everything this connector holds for ``principal_id``.
 
@@ -71,7 +75,7 @@ def disconnect_principal(
             execution_id=None,
             outcome="revoked",
             reason_code=None,
-            correlation_id=str(uuid.uuid4()),
+            correlation_id=_safe_correlation_id(correlation_id),
             google_request_id=None,
         )
     )
@@ -79,3 +83,9 @@ def disconnect_principal(
         credential_revoked=credential is not None,
         accounts_disconnected=len(linked_accounts),
     )
+
+
+def _safe_correlation_id(correlation_id: str | None) -> str:
+    if correlation_id and _CORRELATION_ID_PATTERN.fullmatch(correlation_id):
+        return correlation_id
+    return str(uuid.uuid4())
