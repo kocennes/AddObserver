@@ -1,0 +1,107 @@
+"""Credential-resolution tests (docs/SECURITY.md -- account ownership + vault gates)."""
+
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from backend.src.api.errors import AdsApiError, ErrorClass
+from backend.src.auth.vault import LocalEncryptedVault
+from backend.src.config import Settings
+from backend.src.db.connection import connect
+from backend.src.db.repository import AdsAccountRepository, OAuthCredentialRepository, PrincipalRepository
+from backend.src.mcp.credentials import resolve_google_ads_credentials
+from cryptography.fernet import Fernet
+
+
+class ResolveGoogleAdsCredentialsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.conn = connect(":memory:")
+        self.vault = LocalEncryptedVault(self.conn, Fernet.generate_key())
+        self.accounts = AdsAccountRepository(self.conn)
+        self.oauth_credentials = OAuthCredentialRepository(self.conn)
+        self.settings = Settings(
+            sqlite_db_path=":memory:",
+            environment="test",
+            public_base_url="https://connector.example.com",
+            mcp_resource_path="/mcp",
+            local_vault_key=None,
+            google_client_id="client-id",
+            google_client_secret="client-secret",
+            google_ads_developer_token="dev-token",
+        )
+        self.principal = PrincipalRepository(self.conn).get_or_create("https://accounts.google.com", "sub-1")
+
+    def _resolve(self, *, principal_id: str, customer_id: str):
+        return resolve_google_ads_credentials(
+            principal_id=principal_id,
+            customer_id=customer_id,
+            settings=self.settings,
+            accounts=self.accounts,
+            oauth_credentials=self.oauth_credentials,
+            vault=self.vault,
+        )
+
+    def test_resolves_full_credentials_for_linked_account(self) -> None:
+        self.accounts.link_account(self.principal.id, "1234567890", "1112223333")
+        vault_ref = self.vault.store("google-refresh-token")
+        self.oauth_credentials.upsert(self.principal.id, vault_ref, key_version=1)
+
+        credentials = self._resolve(principal_id=self.principal.id, customer_id="1234567890")
+
+        self.assertEqual(credentials.refresh_token, "google-refresh-token")
+        self.assertEqual(credentials.login_customer_id, "1112223333")
+        self.assertEqual(credentials.developer_token, "dev-token")
+        self.assertEqual(credentials.client_id, "client-id")
+        self.assertEqual(credentials.client_secret, "client-secret")
+
+    def test_unlinked_customer_id_is_rejected(self) -> None:
+        with self.assertRaises(AdsApiError) as ctx:
+            self._resolve(principal_id=self.principal.id, customer_id="9999999999")
+        self.assertEqual(ctx.exception.code, "account_not_linked")
+        self.assertEqual(ctx.exception.error_class, ErrorClass.VALIDATION)
+
+    def test_customer_id_linked_to_another_principal_is_rejected(self) -> None:
+        other = PrincipalRepository(self.conn).get_or_create("https://accounts.google.com", "sub-2")
+        self.accounts.link_account(other.id, "1234567890", None)
+
+        with self.assertRaises(AdsApiError) as ctx:
+            self._resolve(principal_id=self.principal.id, customer_id="1234567890")
+        self.assertEqual(ctx.exception.code, "account_not_linked")
+
+    def test_no_active_google_credential_is_rejected(self) -> None:
+        self.accounts.link_account(self.principal.id, "1234567890", None)
+
+        with self.assertRaises(AdsApiError) as ctx:
+            self._resolve(principal_id=self.principal.id, customer_id="1234567890")
+        self.assertEqual(ctx.exception.code, "no_active_google_credential")
+        self.assertEqual(ctx.exception.error_class, ErrorClass.AUTH)
+
+    def test_revoked_credential_is_rejected(self) -> None:
+        self.accounts.link_account(self.principal.id, "1234567890", None)
+        vault_ref = self.vault.store("google-refresh-token")
+        credential = self.oauth_credentials.upsert(self.principal.id, vault_ref, key_version=1)
+        self.oauth_credentials.revoke(self.principal.id, credential.id)
+
+        with self.assertRaises(AdsApiError) as ctx:
+            self._resolve(principal_id=self.principal.id, customer_id="1234567890")
+        self.assertEqual(ctx.exception.code, "no_active_google_credential")
+
+    def test_unreadable_vault_reference_is_rejected_safely(self) -> None:
+        self.accounts.link_account(self.principal.id, "1234567890", None)
+        # A credential row pointing at a vault_ref that was never stored (or was revoked).
+        self.oauth_credentials.upsert(self.principal.id, "missing-vault-ref", key_version=1)
+
+        with self.assertRaises(AdsApiError) as ctx:
+            self._resolve(principal_id=self.principal.id, customer_id="1234567890")
+        self.assertEqual(ctx.exception.code, "credential_unreadable")
+        self.assertEqual(ctx.exception.error_class, ErrorClass.AUTH)
+        self.assertNotIn("missing-vault-ref", ctx.exception.message)
+
+
+if __name__ == "__main__":
+    unittest.main()
