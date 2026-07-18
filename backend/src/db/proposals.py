@@ -12,8 +12,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from dataclasses import replace
-from datetime import datetime, timezone
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from types import MappingProxyType
 
 from ..approval import (
@@ -29,8 +29,24 @@ from .models import AuditEvent, ExecutionStatus
 MAX_PENDING_PROPOSAL_LIMIT = 100
 
 
+@dataclass(frozen=True)
+class ProposalPage:
+    """One page of ``ProposalRepository.list_pending``.
+
+    ``last_created_at``/``last_id`` are the raw keyset position of the last returned row
+    (``None`` when ``has_more`` is ``False``) -- the caller (``api/routes.py``) turns this
+    into a signed opaque cursor via ``api/pagination.py``. This module never encodes/signs a
+    cursor itself, keeping cursor-format concerns out of the storage layer.
+    """
+
+    proposals: list[Proposal]
+    has_more: bool
+    last_created_at: str | None
+    last_id: str | None
+
+
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class ProposalRepository:
@@ -50,20 +66,27 @@ class ProposalRepository:
             "AND proposal.proposal_hash = excluded.proposal_hash "
             "AND proposal.expires_at = excluded.expires_at",
             (
-                proposal.proposal_id, proposal.principal_id, proposal.customer_id,
-                json.dumps(dict(proposal.payload)), proposal.proposal_hash, proposal.status.value,
-                proposal.expires_at.isoformat(), _now(),
+                proposal.proposal_id,
+                proposal.principal_id,
+                proposal.customer_id,
+                json.dumps(dict(proposal.payload)),
+                proposal.proposal_hash,
+                proposal.status.value,
+                proposal.expires_at.isoformat(),
+                _now(),
             ),
         )
         if cursor.rowcount != 1:
             self._conn.rollback()
             raise ValueError(
-                "proposal_id farkli bir principal/customer kapsaminda veya degisen payload/hash ile kullanilmis"
+                "proposal_id farkli bir principal/customer kapsaminda veya degisen "
+                "payload/hash ile kullanilmis"
             )
         self._conn.commit()
 
     def get(self, principal_id: str, proposal_id: str) -> Proposal | None:
-        """Return the proposal only if it belongs to ``principal_id`` (cross-principal reads return None)."""
+        """Return the proposal only if it belongs to ``principal_id`` (cross-principal reads
+        return None)."""
         row = self._conn.execute(
             "SELECT * FROM proposal WHERE id = ? AND principal_id = ?", (proposal_id, principal_id)
         ).fetchone()
@@ -75,29 +98,52 @@ class ProposalRepository:
         *,
         customer_id: str | None = None,
         limit: int = 50,
+        after_created_at: str | None = None,
+        after_id: str | None = None,
         now: datetime | None = None,
-    ) -> list[Proposal]:
-        """Return this principal's unexpired proposals awaiting a human decision, oldest first."""
+    ) -> ProposalPage:
+        """Return this principal's unexpired proposals awaiting a human decision, oldest first.
+
+        ``after_created_at``/``after_id`` resume from a prior page's last row (keyset
+        pagination, never an offset -- docs/API_DESIGN.md "Pagination sozlesmesi"); both must
+        be given together or not at all.
+        """
         if limit < 1:
             raise ValueError("limit pozitif olmalidir")
         if limit > MAX_PENDING_PROPOSAL_LIMIT:
             raise ValueError(f"limit en fazla {MAX_PENDING_PROPOSAL_LIMIT} olabilir")
-        cutoff_time = now or datetime.now(timezone.utc)
+        if (after_created_at is None) != (after_id is None):
+            raise ValueError("after_created_at ve after_id birlikte verilmelidir")
+        cutoff_time = now or datetime.now(UTC)
         if cutoff_time.tzinfo is None or cutoff_time.utcoffset() is None:
             raise ValueError("now timezone bilgisi icermelidir")
-        cutoff = cutoff_time.astimezone(timezone.utc).isoformat()
+        cutoff = cutoff_time.astimezone(UTC).isoformat()
         params: list[object] = [principal_id, ProposalStatus.PENDING_APPROVAL.value, cutoff]
         customer_filter = ""
         if customer_id is not None:
             customer_filter = " AND customer_id = ?"
             params.append(customer_id)
-        params.append(limit)
+        keyset_filter = ""
+        if after_created_at is not None and after_id is not None:
+            keyset_filter = " AND (created_at > ? OR (created_at = ? AND id > ?))"
+            params.extend([after_created_at, after_created_at, after_id])
+        # customer_filter/keyset_filter are the hardcoded literals set above, never user
+        # input; the actual values are bound via the `?` placeholders in params.
         rows = self._conn.execute(
             "SELECT * FROM proposal WHERE principal_id = ? AND status = ? AND expires_at > ?"
-            f"{customer_filter} ORDER BY created_at LIMIT ?",
-            params,
+            f"{customer_filter}{keyset_filter} "
+            "ORDER BY created_at, id LIMIT ?",  # nosec B608
+            [*params, limit + 1],
         ).fetchall()
-        return [_proposal_from_row(row) for row in rows]
+        has_more = len(rows) > limit
+        proposals = [_proposal_from_row(row) for row in rows[:limit]]
+        last_row = rows[limit - 1] if has_more else None
+        return ProposalPage(
+            proposals=proposals,
+            has_more=has_more,
+            last_created_at=last_row["created_at"] if last_row is not None else None,
+            last_id=last_row["id"] if last_row is not None else None,
+        )
 
 
 def _proposal_from_row(row: sqlite3.Row) -> Proposal:
@@ -113,7 +159,8 @@ def _proposal_from_row(row: sqlite3.Row) -> Proposal:
 
 
 class ApprovalRepository:
-    """Stores every human decision. One proposal may accumulate several rows (rejections retried)."""
+    """Stores every human decision. One proposal may accumulate several rows (rejections
+    retried)."""
 
     def __init__(self, conn: sqlite3.Connection):
         self._conn = conn
@@ -130,8 +177,13 @@ class ApprovalRepository:
             "INSERT INTO approval (id, proposal_id, principal_id, approver_id, decision, "
             "proposal_hash, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
-                str(uuid.uuid4()), approval.proposal_id, approval.principal_id, approval.approver_id,
-                approval.decision.value, approval.proposal_hash, approval.decided_at.isoformat(),
+                str(uuid.uuid4()),
+                approval.proposal_id,
+                approval.principal_id,
+                approval.approver_id,
+                approval.decision.value,
+                approval.proposal_hash,
+                approval.decided_at.isoformat(),
             ),
         )
         self._conn.commit()
@@ -143,17 +195,26 @@ class ApprovalRepository:
         audit_event: AuditEvent,
     ) -> str:
         """Atomically store a human decision and its append-only audit event."""
-        if approval.proposal_id != proposal.proposal_id or approval.principal_id != proposal.principal_id:
+        if (
+            approval.proposal_id != proposal.proposal_id
+            or approval.principal_id != proposal.principal_id
+        ):
             raise ValueError("approval proposal ve principal kapsami uyusmuyor")
         if approval.proposal_hash != proposal.proposal_hash:
             raise ValueError("approval proposal hash'i guncel proposal ile uyusmuyor")
-        if audit_event.proposal_id != proposal.proposal_id or audit_event.principal_id != proposal.principal_id:
+        if (
+            audit_event.proposal_id != proposal.proposal_id
+            or audit_event.principal_id != proposal.principal_id
+        ):
             raise ValueError("audit event proposal ve principal kapsami uyusmuyor")
         if audit_event.customer_id != proposal.customer_id:
             raise ValueError("audit event customer kapsami uyusmuyor")
         if audit_event.actor != approval.approver_id:
             raise ValueError("audit event actor onaylayan ile uyusmuyor")
-        if audit_event.event_type != "approval.decided" or audit_event.outcome != approval.decision.value:
+        if (
+            audit_event.event_type != "approval.decided"
+            or audit_event.outcome != approval.decision.value
+        ):
             raise ValueError("audit event approval karari ile uyusmuyor")
 
         approval_id = str(uuid.uuid4())
@@ -163,8 +224,11 @@ class ApprovalRepository:
                 "UPDATE proposal SET status = ? "
                 "WHERE id = ? AND principal_id = ? AND customer_id = ? AND proposal_hash = ?",
                 (
-                    proposal.status.value, proposal.proposal_id, proposal.principal_id,
-                    proposal.customer_id, proposal.proposal_hash,
+                    proposal.status.value,
+                    proposal.proposal_id,
+                    proposal.principal_id,
+                    proposal.customer_id,
+                    proposal.proposal_hash,
                 ),
             )
             if cursor.rowcount != 1:
@@ -173,8 +237,13 @@ class ApprovalRepository:
                 "INSERT INTO approval (id, proposal_id, principal_id, approver_id, decision, "
                 "proposal_hash, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
-                    approval_id, approval.proposal_id, approval.principal_id, approval.approver_id,
-                    approval.decision.value, approval.proposal_hash, approval.decided_at.isoformat(),
+                    approval_id,
+                    approval.proposal_id,
+                    approval.principal_id,
+                    approval.approver_id,
+                    approval.decision.value,
+                    approval.proposal_hash,
+                    approval.decided_at.isoformat(),
                 ),
             )
             _insert_audit_event(self._conn, audited_event)
@@ -212,9 +281,7 @@ class ExecutionRepository:
     def __init__(self, conn: sqlite3.Connection):
         self._conn = conn
 
-    def record(
-        self, reservation: ExecutionReservation, before: str, after: str
-    ) -> ExecutionClaim:
+    def record(self, reservation: ExecutionReservation, before: str, after: str) -> ExecutionClaim:
         """Atomically claim a key; reject reuse for a different scoped operation."""
         owner = self._conn.execute(
             "SELECT customer_id, proposal_hash FROM proposal WHERE id = ? AND principal_id = ?",
@@ -233,9 +300,15 @@ class ExecutionRepository:
             "(id, proposal_id, principal_id, idempotency_key, before, after, "
             "google_request_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                execution_id, reservation.proposal_id, reservation.principal_id,
-                reservation.idempotency_key, before, after, None,
-                ExecutionStatus.PENDING.value, _now(),
+                execution_id,
+                reservation.proposal_id,
+                reservation.principal_id,
+                reservation.idempotency_key,
+                before,
+                after,
+                None,
+                ExecutionStatus.PENDING.value,
+                _now(),
             ),
         )
         self._conn.commit()
@@ -298,9 +371,18 @@ def _insert_audit_event(conn: sqlite3.Connection, event: AuditEvent) -> None:
         "event_type, proposal_id, approval_id, execution_id, outcome, reason_code, "
         "correlation_id, google_request_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            event.event_id, event.occurred_at.isoformat(), event.actor, event.principal_id,
-            event.customer_id, event.event_type, event.proposal_id, event.approval_id,
-            event.execution_id, event.outcome, event.reason_code, event.correlation_id,
+            event.event_id,
+            event.occurred_at.isoformat(),
+            event.actor,
+            event.principal_id,
+            event.customer_id,
+            event.event_type,
+            event.proposal_id,
+            event.approval_id,
+            event.execution_id,
+            event.outcome,
+            event.reason_code,
+            event.correlation_id,
             event.google_request_id,
         ),
     )

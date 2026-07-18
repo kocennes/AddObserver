@@ -13,8 +13,8 @@ tool handlers can read it back through ``Context.request_context.request``.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -72,7 +72,7 @@ class PrincipalAuthMiddleware:
                 raw_token,
                 self._tokens_factory(),
                 expected_resource=self._expected_resource,
-                now=datetime.now(timezone.utc),
+                now=datetime.now(UTC),
             )
         except BearerTokenError as error:
             await self._deny(scope, receive, send, header, error.description)
@@ -85,7 +85,9 @@ class PrincipalAuthMiddleware:
         await self._app(scope, receive, send)
 
     @staticmethod
-    async def _deny(scope: Scope, receive: Receive, send: Send, www_authenticate: str, description: str) -> None:
+    async def _deny(
+        scope: Scope, receive: Receive, send: Send, www_authenticate: str, description: str
+    ) -> None:
         response = JSONResponse(
             {"error": "invalid_token", "error_description": description},
             status_code=401,
@@ -99,6 +101,7 @@ def get_authenticated_principal_from_request(request: Request) -> AuthenticatedP
     principal = getattr(request.state, "principal", None)
     if not isinstance(principal, AuthenticatedPrincipal):
         raise RuntimeError(
-            "PrincipalAuthMiddleware calismadan bir MCP istegi islendi; bu bir programlama hatasidir."
+            "PrincipalAuthMiddleware calismadan bir MCP istegi islendi; "
+            "bu bir programlama hatasidir."
         )
     return principal

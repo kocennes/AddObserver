@@ -61,6 +61,9 @@ mantıksal varlıklarını ve yaşam döngüsünü tanımlamak.
 - PostgreSQL seçilirse RLS savunma katmanı olarak değerlendirilir; uygulama filtresinin yerine geçmez.
 - Unique constraint ve idempotency key aynı onayın iki kez uygulanmasını engeller.
 - Proposal input/output JSON'u sürümlü şemaya göre doğrulanır; serbest JSON kalıcı sözleşme değildir.
+  `rationale` en fazla 2000 karakter ve kontrol karakteri içermez; `current_status` yalnız Google Ads'in
+  gerçek `CampaignStatus` değerlerinden (`ENABLED`/`PAUSED`/`REMOVED`) biri olabilir; `campaign_id` en fazla
+  19 haneli (`int64`) olabilir (`backend/src/approval/payload_schema.py`).
 
 ## Retention ve sınıflandırma
 
@@ -78,6 +81,12 @@ mantıksal varlıklarını ve yaşam döngüsünü tanımlamak.
 
 ## Güncelleme geçmişi
 
+- 2026-07-18 — Proposal payload'ında `rationale` (uzunluk + kontrol karakteri), `current_status`
+  (Google Ads `CampaignStatus` allowlist'i) ve `campaign_id` (19 hane üst sınırı) için sınır
+  değer doğrulaması eklendi; önceden bu alanlar sınırsız serbest metindi.
+- 2026-07-18 — `authorization_transaction`'a `consent_csrf_hash` alanı eklendi (docs/AUTH.md
+  "Account-linking CSRF savunması"); değer yalnız SHA-256 hash'i olarak saklanır, mevcut
+  token/kod hash-at-rest deseniyle aynıdır.
 - 2026-07-18 — `web_session` CSRF alanı hash-at-rest sözleşmesine göre `csrf_token_hash`
   olarak netleştirildi (docs/AUTH.md, docs/SECURITY.md).
 - 2026-07-17 — `/approvals` insan onay yüzeyi için `web_login_state`/`web_session` varlıkları

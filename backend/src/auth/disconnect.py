@@ -3,11 +3,12 @@ ve Google credential'i ayri ayri iptal eder").
 
 Revokes every persisted grant this connector holds for one principal in a single
 orchestrated step: connector access/refresh tokens (Claude's side), the Google
-credential vault secret and its DB reference, and every linked ads_account -- then
-records one append-only audit_event. This is also how docs/PRODUCT.md's "kullanici
-disconnect ile gelecek erisimi durdurabilir, account deletion talebi baslatabilir"
-requirement is satisfied: nothing here is soft -- the vault secret is permanently
-destroyed (``VaultClient.revoke``), not merely marked inactive. Rows in
+credential vault secret and its DB reference, every linked ads_account, and every
+concurrent browser ``web_session`` -- then records one append-only audit_event.
+This is also how docs/PRODUCT.md's "kullanici disconnect ile gelecek erisimi
+durdurabilir, account deletion talebi baslatabilir" requirement is satisfied:
+nothing here is soft -- the vault secret is permanently destroyed
+(``VaultClient.revoke``), not merely marked inactive. Rows in
 ``ads_account``/``oauth_credential`` are marked revoked rather than deleted only to
 keep the ``proposal``/``approval``/``execution``/``audit_event`` foreign keys and
 history intact (docs/DATA_MODEL.md -- "Audit olaylari append-only'dir; soft delete
@@ -25,6 +26,7 @@ from ..db.models import AuditEvent
 from ..db.oauth_store import TokenRepository
 from ..db.proposals import AuditRepository
 from ..db.repository import AdsAccountRepository, OAuthCredentialRepository
+from ..db.web_session_store import WebSessionRepository
 from .vault import VaultClient
 
 _CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
@@ -45,6 +47,7 @@ def disconnect_principal(
     vault: VaultClient,
     audit: AuditRepository,
     now: datetime,
+    web_sessions: WebSessionRepository | None = None,
     correlation_id: str | None = None,
 ) -> DisconnectResult:
     """Revoke everything this connector holds for ``principal_id``.
@@ -54,6 +57,11 @@ def disconnect_principal(
     audit write on purpose -- access must come down even if the audit insert then
     fails; a revoke that succeeded without a log entry is safe, an unlogged action
     that *doesn't* revoke would not be.
+
+    ``web_sessions`` is optional only so callers outside the ``/approvals`` browser
+    surface (none exist yet) aren't forced to thread a browser-session repository
+    through; the live route always passes it, since a disconnect must end every
+    concurrent browser session for this principal, not just the calling one.
     """
     linked_accounts = accounts.list_accounts(principal_id)
     tokens.revoke_all_for_principal(principal_id, now=now)
@@ -61,6 +69,8 @@ def disconnect_principal(
     if credential is not None:
         vault.revoke(credential.vault_ref)
     accounts.disconnect_all(principal_id)
+    if web_sessions is not None:
+        web_sessions.revoke_all_for_principal(principal_id)
 
     audit.insert(
         AuditEvent(

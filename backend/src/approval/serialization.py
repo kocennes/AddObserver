@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .domain import ApprovalError, Proposal, ProposalStatus
@@ -10,7 +10,7 @@ from .domain import ApprovalError, Proposal, ProposalStatus
 
 def proposal_status_for_read(proposal: Proposal, *, now: datetime | None = None) -> str:
     """Return the externally visible proposal status, including time-based expiry."""
-    current_time = now or datetime.now(timezone.utc)
+    current_time = now or datetime.now(UTC)
     if current_time.tzinfo is None or current_time.utcoffset() is None:
         raise ApprovalError("invalid_time", "now timezone bilgisi icermelidir.")
     if proposal.status is ProposalStatus.PENDING_APPROVAL and current_time >= proposal.expires_at:

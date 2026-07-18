@@ -11,7 +11,6 @@ ve hassas payload kaydedilmez").
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
@@ -204,7 +203,15 @@ def classify_transport_error(exc: Exception) -> AdsApiError:
             message="Google Ads kota/rate limit asildi.",
             request_id=None,
         )
-    if isinstance(exc, (core_exceptions.ServiceUnavailable, core_exceptions.DeadlineExceeded, core_exceptions.InternalServerError, core_exceptions.Aborted)):
+    if isinstance(
+        exc,
+        (
+            core_exceptions.ServiceUnavailable,
+            core_exceptions.DeadlineExceeded,
+            core_exceptions.InternalServerError,
+            core_exceptions.Aborted,
+        ),
+    ):
         return AdsApiError(
             error_class=ErrorClass.TRANSIENT,
             code="transport.unavailable",

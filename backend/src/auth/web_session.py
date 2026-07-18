@@ -15,19 +15,20 @@ No sqlite, no FastAPI, no network I/O lives here (mirrors ``auth/domain.py`` and
 from __future__ import annotations
 
 import secrets
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 
 from .domain import AuthError, hash_token
 
 LOGIN_STATE_TTL_SECONDS = 600
 WEB_SESSION_TTL_SECONDS = 30 * 60
+MAX_CSRF_TOKEN_LENGTH = 128
 
 
 def _utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise AuthError("invalid_request", "Zaman timezone bilgisi icermelidir.")
-    return value.astimezone(timezone.utc)
+    return value.astimezone(UTC)
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,9 +39,13 @@ class WebLoginState:
     expires_at: datetime
 
 
-def issue_login_state(*, now: datetime, ttl_seconds: int = LOGIN_STATE_TTL_SECONDS) -> WebLoginState:
+def issue_login_state(
+    *, now: datetime, ttl_seconds: int = LOGIN_STATE_TTL_SECONDS
+) -> WebLoginState:
     """Issue a fresh, unpredictable login state (RFC 6749 ``state`` role)."""
-    return WebLoginState(state=secrets.token_urlsafe(32), expires_at=_utc(now) + timedelta(seconds=ttl_seconds))
+    return WebLoginState(
+        state=secrets.token_urlsafe(32), expires_at=_utc(now) + timedelta(seconds=ttl_seconds)
+    )
 
 
 def redeem_login_state(*, already_consumed: bool, expires_at: datetime, now: datetime) -> None:
@@ -63,11 +68,13 @@ class WebSession:
 
     Both are random and independent -- knowing one must never reveal the other,
     since the CSRF token is embedded in rendered HTML (and so is a weaker secret)
-    while the session token only ever travels as an HttpOnly cookie.
+    while the session token only ever travels as an HttpOnly cookie. Both carry
+    ``repr=False`` so an accidental ``repr()``/``str()`` of this object never
+    prints either raw value (backend/tests/test_secret_redaction.py).
     """
 
-    token: str
-    csrf_token: str
+    token: str = field(repr=False)
+    csrf_token: str = field(repr=False)
     principal_id: str
     expires_at: datetime
 
@@ -119,13 +126,18 @@ def verify_web_session(
 
 def verify_csrf_token(presented: str | None, expected_hash: str) -> None:
     """Constant-time CSRF field check for every state-changing ``/approvals`` POST."""
-    if not presented or not secrets.compare_digest(hash_token(presented), expected_hash):
+    if (
+        not presented
+        or len(presented) > MAX_CSRF_TOKEN_LENGTH
+        or not secrets.compare_digest(hash_token(presented), expected_hash)
+    ):
         raise AuthError("invalid_csrf", "CSRF token eslesmiyor veya eksik.")
 
 
 __all__ = [
     "hash_token",
     "LOGIN_STATE_TTL_SECONDS",
+    "MAX_CSRF_TOKEN_LENGTH",
     "WEB_SESSION_TTL_SECONDS",
     "WebLoginState",
     "issue_login_state",

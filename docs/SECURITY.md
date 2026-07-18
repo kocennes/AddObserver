@@ -67,8 +67,15 @@ uygulanır.
   yetkilendirme istenir. İşten ayrılma ve müşteri kapatma sürecinde revoke + kalıcı silme yapılır.
 - Google OAuth onboarding 2SV gereksinimini önceden açıklar. `TWO_STEP_VERIFICATION_NOT_ENROLLED` güvenli ve
   actionable bir yeniden-yetkilendirme hatasına çevrilir; başarısız çağrı döngüsü oluşturulmaz.
-- DPoP, Google'ın 2026 önerisine uygun olarak tasarım aşamasında değerlendirilir. Kullanılan resmi
-  Python kitaplıkları ve çalışma ortamı güvenli uygulamayı desteklemiyorsa karar ADR ile belgelenir.
+- DPoP (RFC 9449) şimdilik uygulanmaz — ne Google upstream refresh token'ında ne connector'ın kendi
+  access/refresh token'ında. Gerekçe, araştırma ve yeniden değerlendirme tetikleyicileri
+  `docs/decisions/0004-dpop-deferred.md` içindedir: Google'ın resmi Python kütüphaneleri
+  (`google-auth`, `google-auth-oauthlib`) DPoP proof üretimini desteklemiyor, MCP Authorization
+  spesifikasyonu (2025-11-25) DPoP'tan hiç bahsetmiyor ve bu mimaride Google refresh token'ı zaten
+  hiçbir client'a çıkmadan yalnız backend vault'unda şifreli tutuluyor (DPoP'un hedeflediği "public
+  client'ta tutulan token çalınır" tehdidi yapısal olarak yok). Mevcut kısa ömürlü audience-bound
+  access token + refresh rotation/family reuse-detection (`db/oauth_store.py::rotate`/
+  `revoke_family`) bu artışta yeterli kabul edildi.
 - OAuth client ve secret erişimleri en az yetkiyle sınırlandırılır; kullanılmayan client'lar silinir.
 
 ## Secret yönetimi
@@ -138,7 +145,11 @@ gereksinimleri uygulanır.
 - Reklam metni, arama terimi, URL ve üçüncü taraf veri prompt injection taşıyabilir; bunlar talimat değil
   veri olarak etiketlenir ve tool çağırma/yazma yetkisini değiştiremez.
 - Modelin ürettiği URL fetch edilmez. Gerekirse SSRF korumalı allowlist, DNS/IP yeniden doğrulama,
-  redirect sınırı ve özel ağ engeli uygulanır.
+  redirect sınırı ve özel ağ engeli uygulanır. DNS çözümlemesi doğrulama ve bağlantı arasında
+  tekrarlanmaz (DNS-rebinding TOCTOU): bağlantı, doğrulanmış tam IP'ye pinlenir; orijinal hostname
+  yalnız `Host` başlığı ve TLS SNI için korunur; yönlendirme (redirect) hiç takip edilmez; cevap
+  gövdesi boyut sınırlıdır ve yalnız `application/json` Content-Type kabul edilir
+  (`backend/src/auth/cimd.py`).
 - Remote transport HTTPS kullanır; PKCE, kesin redirect URI doğrulaması, kısa token ömrü ve session
   binding zorunludur. Session ID kimlik doğrulama yerine geçmez ve kullanıcılar arasında paylaşılmaz.
 - Tool sonucu minimum veridir; erişim ve yazma denemeleri audit edilir.
@@ -147,6 +158,12 @@ gereksinimleri uygulanır.
 
 - API sınırında tür, format, boyut, enum ve iş kuralı doğrulaması yapılır; GAQL parçaları kullanıcı/model
   metninden string birleştirme ile oluşturulmaz.
+- Connector OAuth AS'ın public `/authorize`, `/authorize/consent`, `/google/callback` ve `/token`
+  girdileri de aynı kurala tabidir: `client_id` DNS/ağ çağrısından önce uzunluk sınırıyla reddedilir
+  (`backend/src/auth/cimd.py`), `state`/`scope` sınır değerlidir ve `code_challenge`/`code_verifier`
+  RFC 7636'nın 43-128 karakterlik base64url biçimini doğrulanmadan hash karşılaştırmasına girmez
+  (`backend/src/auth/domain.py`); `transaction_id`/`state` opaque kimlikleri DB sorgusundan önce
+  URL-safe/uzunluk doğrulamasından geçer (docs/AUTH.md "Saldırı kontrolleri").
 - State-changing endpoint'ler CSRF koruması, yeniden kimlik doğrulama gereken risk eşiği ve idempotency
   anahtarı kullanır. CORS açık allowlist'tir.
   - Uygulama: `/approvals` (docs/AUTH.md "Approval-UI web girişi") -- session cookie
@@ -154,9 +171,19 @@ gereksinimleri uygulanır.
     session'dan bağımsız üretilmiş bir `csrf_token`'ı hashleyip saklı hash'e karşı
     `secrets.compare_digest` ile doğrular; `/logout` ve `/disconnect` aynı synchronizer token
     desenini kullanır. Session ve CSRF token değerleri yalnız SHA-256 hash'i olarak saklanır.
+    `/logout` yalnız isteği yapan çerezi iptal eder (diğer cihazlardaki oturumlar etkilenmez);
+    `/disconnect` ise principal'ın **tüm** `web_session` satırlarını iptal eder -- destructive/
+    geri döndürülemez bir eylem olduğu için eşzamanlı hiçbir tarayıcı oturumu ayakta kalmaz.
 - Public HTTP cevapları varsayılan olarak `Cache-Control: no-store`, `Referrer-Policy: no-referrer`,
   `X-Content-Type-Options: nosniff` ve form-only katı CSP (`default-src 'none'`, `script-src 'none'`,
-  `form-action 'self'`, `frame-ancestors 'none'`) taşır.
+  `form-action 'self'`, `frame-ancestors 'none'`) taşır; `environment` `local` dışındaysa ayrıca
+  `Strict-Transport-Security: max-age=63072000; includeSubDomains` eklenir (`backend/src/app.py`).
+  Bu karar `X-Forwarded-Proto` gibi proxy başlıklarına güvenmez -- DEPLOYMENT.md'nin proxy topolojisi
+  ADR'i kabul edilene kadar yalnız yerel config (`APP_ENVIRONMENT`) kullanılır.
+- `Host` başlığı `TrustedHostMiddleware` ile `PUBLIC_BASE_URL`'in hostname'ine (veya açıkça
+  ayarlanmış `ALLOWED_HOSTS`'a) karşı doğrulanır; eşleşmeyen istek 400 ile reddedilir. CORS varsayılan
+  olarak kapalıdır (`CORS_ALLOWED_ORIGINS` boşsa çapraz-origin erişim yoktur); yalnız açık, `*`
+  olmayan bir allowlist eklenebilir ve `Access-Control-Allow-Credentials` hiçbir zaman gönderilmez.
 - Hata cevapları secret, SQL, stack trace veya başka kullanıcı/hesap varlığını açığa çıkarmaz.
 - Bağımlılıklar kilitlenir, düzenli taranır ve desteklenen sürümlerde tutulur.
 
@@ -172,6 +199,13 @@ gereksinimleri uygulanır.
   `approval.decided` audit_event'i aynı transaction içinde yazılır. Audit yazılamazsa karar
   fail-closed kalır.
 - Token, secret, authorization header, cookie, tam prompt, gereksiz PII ve ödeme verisi loglanmaz.
+- Secret tasiyan her nesne (`Settings`, `GoogleAdsCredentials`, `GoogleTokenResult`,
+  `AuthorizationCode`/`AccessToken`/`RefreshToken`, `WebSession`, `WebSessionIssued`) ilgili
+  alanlarda `dataclasses.field(repr=False)` tasir -- yapisal loglama henuz eklenmedi (Faz 9.1
+  acik) ama bu nesneler neredeyse her istek yolundan gectigi icin, ileride eklenecek bir
+  `logger.debug(...)`, bir f-string veya yakalanmamis bir exception'in traceback'indeki yerel
+  degiskenin `repr()`/`str()`'ye dusmesi tek basina TUM secret'i sizdirir; bu savunma bunu
+  onceden kapatir (kanit: `backend/tests/test_secret_redaction.py`).
 - Saatler senkronize edilir; erişim, export ve retention işlemleri audit edilir.
 - Retention süresi hukuk/iş ihtiyacıyla üretim öncesi kararlaştırılır (`TBD`); süresiz saklama varsayılmaz.
 
@@ -185,16 +219,111 @@ gereksinimleri uygulanır.
 - Restricted-scope OAuth verification ve Google'ın gerekli gördüğü bağımsız security assessment tamamlanmadan
   gerçek dış kullanıcı verisiyle production açılmaz; gerekiyorsa değerlendirme her yıl yenilenir.
 
-## Açık sorular
+## Uçtan uca tehdit modeli
+
+Bu bölüm `ARCHITECTURE.md`'deki güven sınırlarını STRIDE benzeri bir yöntemle tehdit/azaltım/kanıt
+üçlüsüne çevirir. Amaç, hangi tehditlerin bugün gerçek kodla kapatıldığını, hangilerinin henüz
+uygulanmamış bir bileşene (queue, structured logging, execution) bağlı olduğu için "kapsam dışı/
+henüz yok" sayıldığını ve hangilerinin bilinçli artık risk olarak açık kaldığını tek yerde
+görünür kılmaktır. Yeni bir güven sınırı (queue, execution adapter, managed secrets/KMS, structured
+logging) eklendiğinde bu tablo aynı değişiklikte güncellenir.
+
+### Güven sınırları
+
+| # | Bileşen | Güvenilir mi | Not |
+|---|---|---|---|
+| B1 | Claude MCP client | Hayır | Dışarıdan gelen herhangi bir MCP client; tool argümanı ve rationale/metin alanları untrusted girdi. |
+| B2 | Public MCP resource server (`backend/src/mcp`) | Kısmen | Bizim kodumuz ama public internete açık; Google token'ı hiç tutmaz. |
+| B3 | Connector Authorization Server (`backend/src/auth`, hand-rolled, ADR-0002) | Kısmen | Bizim kodumuz; state/PKCE/redirect_uri/resource binding'i taşır. |
+| B4 | Google OAuth (upstream) | Hayır (dış taraf) | Yalnız Google'ın imzaladığı sonucu kabul ederiz; kendi `state`/PKCE'imizle bağlarız. |
+| B5 | Approval tarayıcısı (`/login` + `/approvals`, insan) | Kısmen | `adwords` scope istemez, Google Ads'e yazmaz; yalnız yerel proposal karar kaydı. |
+| B6 | DB (SQLite prototip; production Postgres — `todo.md` 4.x) | Evet (uygulama süreci) | Principal-scoped repository filtreleri tek savunma katmanı; RLS henüz yok (4.3 açık). |
+| B7 | Vault (yerel Fernet — `auth/vault.py`; production KMS — `todo.md` 10.6) | Evet (uygulama süreci) | Refresh token/secret yalnız burada düz metin; DB'de yalnız referans/hash. |
+| B8 | Queue / async worker | Yok | Henüz uygulanmadı; ARCHITECTURE.md bileşen listesinde yer alsa da kod karşılığı yok — bu tehdit modelinde "N/A, eklenince genişletilir" olarak işaretli. |
+| B9 | Observability (structured log/trace) | Yok | Faz 9.1 açık; bugün `backend/src`'de `logging`/`print` çağrısı yok (bkz. Faz 2.2 kanıtı), bu yüzden "log'a sızma" bugün gerçek bir yüzey değil. |
+| B10 | Google Ads API (upstream) | Hayır (dış taraf) | Bugün hiç mutate çağrısı yok (Faz 8 tamamı bloke); yalnız reporting adapter'ı devrede. |
+
+### Tehdit envanteri
+
+| # | Tehdit (STRIDE) | Sınır | Azaltım | Kanıt | Artık risk |
+|---|---|---|---|---|---|
+| T1 | Google refresh token hırsızlığı (Bilgi ifşası) | B7↔B6 | Refresh token yalnız vault'ta düz metin tutulur; DB'de yalnız kasa referansı/hash. Secret taşıyan dataclass'lar `repr=False`. | `auth/vault.py`, `backend/tests/test_auth_vault.py`, `backend/tests/test_secret_redaction.py` | Üretim secrets manager/KMS sağlayıcısı henüz seçilmedi (`todo.md` 10.6) — yerel Fernet anahtarı tek başına üretim için yeterli değil. |
+| T2 | Connector access/refresh token hırsızlığı veya replay (Bilgi ifşası, Kurcalama) | B1↔B2, B3↔B6 | HTTPS-only; access token kısa ömürlü ve audience-bound (`verify_access_token`); refresh rotation + reuse tespiti tüm `family_id`'yi fail-closed revoke eder. | `auth/deps.py::verify_access_token`, `db/oauth_store.py::rotate`/`revoke_family`, `backend/tests/test_oauth_store.py::ConcurrentAuthorizationCodeClaimTests` | Token TTL/rotation aralığının tam eşzamanlılık/negatif test matrisi hâlâ açık (`todo.md` 3.4). |
+| T3 | Confused deputy — bir client'ın başka client'ın authorization code'unu veya kaynağını kendi adına kullanması (Kimlik sahteciliği) | B3↔B4 | Authorization code; `client_id`, `redirect_uri`, PKCE verifier ve `resource` ile bağlanır; uyuşmazlıkta `invalid_client`/`invalid_grant`. | `backend/tests/test_auth_authorization_flow_http.py` (cross-client redeem reddi, yanlış PKCE reddi) | Yok — üretim davranışını uçtan uca egzersiz eden HTTP testiyle kapatıldı (Faz 3.3). |
+| T4 | SSRF — CIMD `client_id` URL'i saldırganın kontrolündeki bir host'a işaret eder (Yetki yükseltme) | B1→B3 | `https://` allowlist, DNS-rebinding TOCTOU pini (tek çözümleme, doğrulanmış IP'ye bağlanma), redirect=0, response-size streaming sınırı, `application/json` Content-Type zorunluluğu. | `auth/cimd.py`, `backend/tests/test_auth_cimd.py` (IPv4-mapped/NAT64/encoded-host/TOCTOU dahil) | Yok — bilinen bypass sınıfları ampirik olarak test edildi (Faz 3.2). |
+| T5 | Prompt injection — reklam metni/keyword/rationale içine gömülü talimatın tool scope/customer/proposal tipini değiştirmesi (Kurcalama) | B1→B2 | Untrusted metin sabit alan-getter sözlüğünde tek, minimize alan olarak döner; `customer_id`/`campaign_id`/`proposal_type` ayrı doğrulanmış parametrelerdir, rationale metninden asla türetilmez. | `backend/tests/test_prompt_injection_safety.py` | Yok — hem adapter hem gerçek MCP Streamable HTTP protokolü üzerinden kanıtlandı (Faz 2.4). |
+| T6 | IDOR / cross-principal veya cross-customer erişim (Bilgi ifşası, Yetki yükseltme) | B2↔B6 | Her repository metodu `principal_id` zorunlu parametresiyle filtreler; opaque ID'ler (`transaction_id`/`proposal_id`/vb.) DB sorgusundan önce biçim doğrulamasından geçer; cross-principal ve var-olmayan kaynak aynı hata şeklini döner. | `api/identifiers.py`, `backend/tests/test_api_identifiers.py`, `backend/tests/test_db_proposals.py` | RLS (DB-seviyesi ikinci savunma katmanı) henüz yok — bugünkü izolasyon tamamen uygulama katmanı disiplinine dayanır (`todo.md` 4.3). |
+| T7 | CSRF — `/approvals` karar, `/disconnect`, `/logout`, `/authorize/consent` (Kurcalama) | B5→B3/B2 | Session'dan bağımsız üretilmiş synchronizer token, yalnız hash olarak saklanır, `secrets.compare_digest` ile doğrulanır; `SameSite=Strict` cookie. | `backend/tests/test_approvals_http.py`, `backend/tests/test_auth_server_http.py::AuthorizeConsentCsrfTests` | Yok. |
+| T8 | Authorization code / state replay (Kurcalama) | B3↔B4 | Kod tek kullanımlık atomik `UPDATE ... WHERE consumed_at IS NULL` ile claim edilir; `state` kısa ömürlü ve callback'te tüketilir. | `backend/tests/test_auth_authorization_flow_http.py` (ikinci `/token` denemesi `invalid_grant`), `backend/tests/test_oauth_store.py::ConcurrentAuthorizationCodeClaimTests` (gerçek iki-thread race) | Yok. |
+| T9 | Session fixation / çalıntı `web_session` çerezinin disconnect sonrası hâlâ geçerli kalması (Kimlik sahteciliği) | B5↔B6 | Her girişte taze `secrets.token_urlsafe` session+CSRF çifti (fixation yok); `disconnect_principal` principal'ın **tüm** `web_session` satırlarını iptal eder, yalnız isteği yapan çerezi değil. | `backend/tests/test_auth_web_session.py`, `backend/tests/test_auth_disconnect.py` | Riskli eylemler için re-auth/step-up eşiği henüz kararlaştırılmadı (`todo.md` 7.3, WRITE kapsamı sonrasına bloke). |
+| T10 | Audit kurcalama / geçmiş olayın değiştirilmesi-silinmesi (Kurcalama, İnkar) | B2/B3/B5→B6 | `AuditRepository` yalnız `insert`/`list_for_principal` sağlar; update/delete metodu yoktur. Proposal/approval/audit tek transaction'da atomik yazılır; audit açılamazsa karar fail-closed kalır. | `db/proposals.py::AuditRepository`, `db/proposals.py::ApprovalRepository.save_decision_with_audit` | Üretim WORM/append-only depo sağlayıcısı henüz seçilmedi (`todo.md` 9.3) — bugünkü koruma yalnız "uygulama kodu update/delete sunmuyor" seviyesinde, DB dosyasına doğrudan erişimi ayrıca engellemez. |
+| T11 | Bağımlılık/tedarik zinciri kompromisi (Kurcalama, Bilgi ifşası) | Repo → B2/B3 | SAST (Bandit), secret tarama (detect-secrets), dependency scan (pip-audit) araç seti ADR ile kabul edildi ve pin'lendi. | `docs/decisions/0003-dev-tooling.md`, `backend/pyproject.toml` | Reproducible lockfile (`uv.lock`) henüz üretilmedi (`todo.md` 10.1); CI'da otomatik gate henüz yok (`todo.md` 10.2) — bugün yalnız yerel/manuel çalıştırma. |
+| T12 | Yetkisiz Google Ads mutate (Yetki yükseltme, İnkar) | B2→B10 | Bugün kod tabanında Google Ads'e giden hiçbir mutate çağrısı yok (Faz 8 tamamı bloke); `prepare_proposal` yalnız kendi DB'mize yazar. `test_prompt_injection_safety.py` bir proposal'ın otomatik onaylanamadığını (durumun `pending_approval` kaldığını) ayrıca kanıtlıyor. | `mcp/proposals.py`, `backend/tests/test_prompt_injection_safety.py` | Faz 8 açıldığında revalidation/reservation/idempotency/reconciliation kontrolleri bu tehdit modeline yeni satırlar olarak eklenmelidir; bugün "yok" denmesinin nedeni özellik eksikliği, tasarım kanıtı değil. |
+| T13 | Kaynak tükenmesi / adil olmayan kullanım — bir principal'ın diğerlerini quota/latency açısından aç bırakması (Hizmet reddi) | B1→B2/B10 | Yok — rate limiting/fair-queue katmanı henüz uygulanmadı. | — | Açık artık risk (`todo.md` 6.7); Google Ads Basic Access sınırı (15.000 işlem/24 saat) tüm principal'lar için tek paylaşılan bütçe, şu an principal bazında bölünmüyor. |
+| T14 | Log/trace/hata cevabına secret veya PII sızıntısı (Bilgi ifşası) | B2/B3→B9 | Yapısal logging henüz eklenmedi (bugün gerçek yüzey yok); secret taşıyan yedi dataclass önceden `repr=False` ile korunuyor; sınıflandırılamayan exception metni public hata mesajına hiç taşınmıyor. | `backend/tests/test_secret_redaction.py`, `backend/tests/test_api_errors.py::test_unrecognised_exception_text_never_reaches_the_public_message` | Faz 9.1 (yapısal logging) açıldığında redaction'ın gerçek log çıktısı üzerinden yeniden doğrulanması gerekir — bugünkü kanıt yalnız `repr()`/mesaj seviyesinde. |
+
+### Açık sorular
 
 - Üretim secrets manager ve KMS sağlayıcısı.
 - Public kullanıcı ölçeğinde RLS/pool performansı ve gerekirse sharding sınırı.
 - Audit retention süresi ve WORM sağlayıcısı.
-- DPoP desteği ve uygulanabilirliği.
 
 ## Güncelleme geçmişi
 
+- 2026-07-18 — DPoP açık sorusu `docs/decisions/0004-dpop-deferred.md` ile kapatıldı (Faz 2.5):
+  hem Google upstream refresh token hem connector'ın kendi access/refresh token'ı için DPoP
+  şimdilik uygulanmayacak şekilde karar verildi — resmi Python kütüphaneleri (`google-auth`,
+  `google-auth-oauthlib`, `authlib`) proof üretimini desteklemiyor, MCP Authorization
+  spesifikasyonu (2025-11-25) DPoP'tan hiç bahsetmiyor ve Google refresh token'ı bu mimaride zaten
+  hiçbir client'a çıkmıyor. Kod değişikliği yoktur; ADR yeniden değerlendirme tetikleyicileri
+  taşır.
+- 2026-07-18 — Uçtan uca tehdit modeli eklendi ("Uçtan uca tehdit modeli" bölümü, Faz 2.1):
+  `ARCHITECTURE.md` güven sınırları (Claude client, public MCP, connector AS, Google OAuth,
+  approval tarayıcısı, DB, vault, queue, observability, Google Ads API) STRIDE benzeri 14 tehdit
+  satırına ve her biri için kod/test kanıtına bağlandı. Bugün kod karşılığı olmayan güven sınırları
+  (queue, structured logging) "N/A, eklenince genişletilir" olarak; henüz uygulanmamış kontroller
+  (rate limiting, RLS, üretim WORM audit deposu, execution/mutate) bilinçli artık risk olarak
+  işaretlendi. Analiz sırasında kod değişikliği gerektiren yeni bir kusur bulunmadı.
+- 2026-07-18 — Secret tasiyan yedi dataclass'a (`Settings`, `GoogleAdsCredentials`,
+  `GoogleTokenResult`, `AuthorizationCode`, `AccessToken`, `RefreshToken`, `WebSession`,
+  `WebSessionIssued`) `dataclasses.field(repr=False)` eklendi (Faz 2.2); onceden bu nesnelerin
+  varsayilan `repr()`'i her alani (developer token, client secret, refresh/access/bearer token,
+  vault key) duz metin yazdiriyordu -- yapisal loglama henuz eklenmedigi icin bugun bir HTTP/MCP
+  yanitina sizmiyordu ama ileride eklenecek herhangi bir `logger.debug(...)`/f-string/yakalanmamis
+  exception traceback'i tek basina tum secret'i sizdirirdi; kanit `backend/tests/test_secret_redaction.py`.
+  `classify_transport_error`'in siniflandirilamayan-exception dalinin orijinal exception metnini
+  hicbir zaman public mesaja tasimadigi da regresyon testiyle sabitlendi
+  (`backend/tests/test_api_errors.py`).
+- 2026-07-18 — Public HTTP yüzeyine `Strict-Transport-Security` (yalnız `local` dışı ortamda),
+  `Host` başlığı allowlist doğrulaması (`TrustedHostMiddleware`) ve kapalı-varsayılan CORS allowlist
+  (`CORSMiddleware`, `allow_credentials=False`) eklendi (`backend/src/app.py`,
+  `backend/src/config.py`); önceden CORS hiç uygulanmıyordu (yalnız bu belgede "açık allowlist"
+  olarak kararlaştırılmıştı ama kod karşılığı yoktu) ve `Host` başlığı doğrulanmıyordu.
+- 2026-07-18 — Connector OAuth AS'ın `client_id`/`state`/`scope`/`code_challenge`/`code_verifier`/
+  `transaction_id` girdilerine sınır değer ve RFC 7636 biçim doğrulaması eklendi (docs/AUTH.md
+  "Saldırı kontrolleri" → "Girdi sınır değerleri"); önceden bu alanlar DB'ye veya ağ çağrısına
+  ulaşmadan önce herhangi bir uzunluk/biçim kontrolünden geçmiyordu.
+- 2026-07-18 — CIMD `client_id` fetch'i artık DNS'i yalnız bir kez çözer ve bağlantıyı o doğrulanmış
+  IP'ye pinler (`backend/src/auth/cimd.py`); önceki halde SSRF kontrolü ve gerçek HTTP bağlantısı
+  ayrı DNS çözümlemeleri kullandığından bir DNS-rebinding saldırganı doğrulamayı geçip bağlantıyı
+  private bir adrese yönlendirebilirdi (TOCTOU).
+- 2026-07-18 — Connector OAuth AS'ın `/authorize/consent` uç noktasına account-linking CSRF
+  koruması eklendi (docs/AUTH.md "Saldırı kontrolleri"); önceki halde bu state-changing POST
+  hiçbir CSRF doğrulaması yapmıyordu.
 - 2026-07-18 — Approval UI CSRF token doğrulaması hash-at-rest davranışıyla netleştirildi.
+- 2026-07-18 — `POST /disconnect` artık principal'ın tüm `web_session` satırlarını iptal ediyor
+  (`WebSessionRepository.revoke_all_for_principal`, docs/AUTH.md "Disconnect"); önceki halde yalnız
+  isteği yapan çerez iptal ediliyordu, bu yüzden aynı principal'ın eşzamanlı ikinci bir tarayıcı
+  oturumu disconnect sonrasında da geçerli kalıp `/approvals`'ı listeleyip karar verebilirdi.
+- 2026-07-18 — CIMD fetch'ine Content-Type doğrulaması eklendi (`backend/src/auth/cimd.py`):
+  yalnızca `application/json` (parametreler hariç) dönen cevaplar kabul edilir; önceden bir CIMD
+  host'unun `text/html` gibi başka bir Content-Type ile geçerli JSON baytı döndürmesi hâlâ kabul
+  ediliyordu. IPv6 SSRF-guard davranışı (literal loopback/unique-local/link-local, IPv4-mapped
+  ve NAT64 Well-Known-Prefix (`64:ff9b::/96`) adresler, encoded/alternate host metinleri, userinfo
+  authority confusion) incelendi: mevcut `is_private`/`is_reserved` kontrolü bunların tamamını
+  zaten kapsıyordu (`is_private` mapped adresler için gömülü IPv4'e delege eder; `64:ff9b::/96`
+  uzun süredir `is_reserved` olan `::/8` bloğunun içinde kalır) — kod değişikliği gerekmedi, yalnız
+  regresyon testi eksikti (`backend/tests/test_auth_cimd.py`).
 - 2026-07-17 — `/approvals` insan onay yüzeyi için CSRF token + cookie özniteliği kararı eklendi
   (docs/AUTH.md).
 - 2026-07-17 — Public HTTP güvenlik header'ları ve `/logout` CSRF doğrulaması uygulama standardına eklendi.

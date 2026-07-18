@@ -14,18 +14,24 @@ access token, never from a tool argument (docs/MCP.md).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
 from ..api.errors import AdsApiError, ErrorClass
+from ..api.identifiers import validate_opaque_id
 from ..api.queries import validate_customer_id
 from ..approval import ApprovalError, Proposal, build_proposal_payload, submit_proposal
 from ..approval.serialization import proposal_to_dict
 from ..db.proposals import ProposalRepository
 from ..db.repository import AdsAccountRepository
-from .tool_support import LOCAL_WRITE, READ_ONLY_LOCAL, authenticated_principal_id, close_input_schema
+from .tool_support import (
+    LOCAL_WRITE,
+    READ_ONLY_LOCAL,
+    authenticated_principal_id,
+    close_input_schema,
+)
 from .tools import MCPToolContext
 
 #: Bounds on how long a prepared proposal stays actionable before it expires
@@ -55,7 +61,9 @@ def _verify_account_ownership(context: MCPToolContext, principal_id: str, custom
         )
 
 
-def register_proposal_tools(mcp: FastMCP, context: MCPToolContext, proposals: ProposalRepository) -> None:
+def register_proposal_tools(
+    mcp: FastMCP, context: MCPToolContext, proposals: ProposalRepository
+) -> None:
     """Register the Faz 1 proposal-preparation tools and close each input schema."""
 
     @mcp.tool(title="Değişiklik önerisi hazırla", annotations=LOCAL_WRITE, structured_output=False)
@@ -70,7 +78,8 @@ def register_proposal_tools(mcp: FastMCP, context: MCPToolContext, proposals: Pr
         proposed_budget_amount_micros: int | None = None,
         expires_in_minutes: int = DEFAULT_EXPIRY_MINUTES,
     ) -> dict[str, Any]:
-        """Draft a Faz 1.1 allowlist proposal (campaign pause/enable or budget update) for human review.
+        """Draft a Faz 1.1 allowlist proposal (campaign pause/enable or budget update) for
+        human review.
 
         This never calls Google Ads and never applies anything by itself -- it
         only stores a draft the account owner must separately approve before any
@@ -81,7 +90,8 @@ def register_proposal_tools(mcp: FastMCP, context: MCPToolContext, proposals: Pr
         if not (MIN_EXPIRY_MINUTES <= expires_in_minutes <= MAX_EXPIRY_MINUTES):
             raise ApprovalError(
                 "invalid_expiry",
-                f"expires_in_minutes {MIN_EXPIRY_MINUTES} ile {MAX_EXPIRY_MINUTES} arasinda olmalidir.",
+                f"expires_in_minutes {MIN_EXPIRY_MINUTES} ile {MAX_EXPIRY_MINUTES} "
+                "arasinda olmalidir.",
             )
 
         payload = build_proposal_payload(
@@ -93,7 +103,7 @@ def register_proposal_tools(mcp: FastMCP, context: MCPToolContext, proposals: Pr
             proposed_budget_amount_micros=proposed_budget_amount_micros,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         draft = Proposal.create(
             proposal_id=str(uuid.uuid4()),
             principal_id=principal_id,
@@ -107,14 +117,23 @@ def register_proposal_tools(mcp: FastMCP, context: MCPToolContext, proposals: Pr
 
     @mcp.tool(title="Öneri durumunu getir", annotations=READ_ONLY_LOCAL, structured_output=False)
     def get_proposal(ctx: Context, proposal_id: str) -> dict[str, Any]:
-        """Return a previously prepared proposal's current status, only if it belongs to the caller."""
+        """Return a previously prepared proposal's current status, only if it belongs to the
+        caller."""
         principal_id = authenticated_principal_id(ctx)
+        try:
+            validate_opaque_id(proposal_id, field_name="proposal_id")
+        except ValueError as error:
+            raise ApprovalError("invalid_proposal_id", str(error)) from error
         proposal = proposals.get(principal_id, proposal_id)
         if proposal is None:
-            raise ApprovalError("proposal_not_found", "Bu proposal_id bu baglantiya ait degil veya bulunamadi.")
+            raise ApprovalError(
+                "proposal_not_found", "Bu proposal_id bu baglantiya ait degil veya bulunamadi."
+            )
         return proposal_to_dict(proposal)
 
-    @mcp.tool(title="Bekleyen önerileri listele", annotations=READ_ONLY_LOCAL, structured_output=False)
+    @mcp.tool(
+        title="Bekleyen önerileri listele", annotations=READ_ONLY_LOCAL, structured_output=False
+    )
     def list_proposals(
         ctx: Context,
         customer_id: str | None = None,
@@ -131,12 +150,17 @@ def register_proposal_tools(mcp: FastMCP, context: MCPToolContext, proposals: Pr
             validate_customer_id(customer_id)
             _verify_account_ownership(context, principal_id, customer_id)
         if not (1 <= limit <= MAX_LIST_LIMIT):
-            raise ApprovalError("invalid_limit", f"limit 1 ile {MAX_LIST_LIMIT} arasinda olmalidir.")
+            raise ApprovalError(
+                "invalid_limit", f"limit 1 ile {MAX_LIST_LIMIT} arasinda olmalidir."
+            )
+        page = proposals.list_pending(principal_id, customer_id=customer_id, limit=limit)
         return {
-            "proposals": [
-                proposal_to_dict(proposal)
-                for proposal in proposals.list_pending(principal_id, customer_id=customer_id, limit=limit)
-            ]
+            "proposals": [proposal_to_dict(proposal) for proposal in page.proposals],
+            # Cursor-based continuation is HTTP-only for now (docs/API_DESIGN.md "Pagination
+            # sozlesmesi", todo.md 6.1 still open for the MCP tool contract) -- ``has_more``
+            # at least tells the caller a truncated page happened instead of silently implying
+            # completeness.
+            "has_more": page.has_more,
         }
 
     for tool_name in ("prepare_proposal", "get_proposal", "list_proposals"):

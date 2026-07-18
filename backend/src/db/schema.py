@@ -131,6 +131,7 @@ SCHEMA_STATEMENTS = [
         resource TEXT NOT NULL,
         scope TEXT NOT NULL,
         client_state TEXT NOT NULL,
+        consent_csrf_hash TEXT NOT NULL,
         status TEXT NOT NULL,
         expires_at TEXT NOT NULL,
         created_at TEXT NOT NULL

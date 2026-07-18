@@ -48,7 +48,10 @@ def resolve_google_ads_credentials(
         raise AdsApiError(
             error_class=ErrorClass.AUTH,
             code="no_active_google_credential",
-            message="Google hesabi bagli degil veya baglanti iptal edilmis; yeniden baglanmaniz gerekiyor.",
+            message=(
+                "Google hesabi bagli degil veya baglanti iptal edilmis; "
+                "yeniden baglanmaniz gerekiyor."
+            ),
             request_id=None,
         )
 
@@ -69,3 +72,22 @@ def resolve_google_ads_credentials(
         refresh_token=refresh_token,
         login_customer_id=account.login_customer_id,
     )
+
+
+def deactivate_credential_on_auth_failure(
+    error: AdsApiError, *, principal_id: str, oauth_credentials: OAuthCredentialRepository
+) -> None:
+    """ERROR_HANDLING.md 'Auth' row: '`invalid_grant`, permission -> Credential
+    pasifleştir, işleri durdur'.
+
+    Any AUTH-class failure (revoked/expired refresh token, 2SV no longer enrolled,
+    permission withdrawn, ...) means the stored refresh token can no longer be trusted
+    for this principal. Deactivating it here (DB-only -- the vault secret itself is
+    left alone, unlike disconnect's deliberate destroy; docs/SECURITY.md
+    "pasifleştirilir") makes every subsequent call fail fast through the
+    ``no_active_google_credential`` branch above instead of repeatedly re-trying
+    Google with a token already known to be bad (todo.md 3.6 -- "sonsuz retry
+    yapma").
+    """
+    if error.error_class is ErrorClass.AUTH:
+        oauth_credentials.revoke_active(principal_id)

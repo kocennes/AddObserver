@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import sqlite3
 import sys
 import unittest
@@ -15,9 +16,10 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from backend.src.app import (
+    HSTS_HEADER,
     MAX_REQUEST_BODY_BYTES,
-    RequestBodyLimitMiddleware,
     SECURITY_RESPONSE_HEADERS,
+    RequestBodyLimitMiddleware,
     create_app,
 )
 from backend.src.auth.google_oauth import FakeGoogleOAuthClient
@@ -36,6 +38,8 @@ def _settings() -> Settings:
         google_client_id="client-id",
         google_client_secret="client-secret",
         google_ads_developer_token="dev-token",
+        allowed_hosts=("connector.example.com",),
+        cors_allowed_origins=(),
     )
 
 
@@ -79,9 +83,13 @@ class AppLifecycleTests(unittest.IsolatedAsyncioTestCase):
         middleware = RequestBodyLimitMiddleware(draining_app, max_body_bytes=5)
         await middleware(scope, receive, send)
 
-        response_start = next(message for message in sent_messages if message["type"] == "http.response.start")
+        response_start = next(
+            message for message in sent_messages if message["type"] == "http.response.start"
+        )
         response_body = b"".join(
-            message.get("body", b"") for message in sent_messages if message["type"] == "http.response.body"
+            message.get("body", b"")
+            for message in sent_messages
+            if message["type"] == "http.response.body"
         )
         self.assertEqual(response_start["status"], 413)
         self.assertIn(b"request_body_too_large", response_body)
@@ -89,16 +97,18 @@ class AppLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_rejects_oversized_request_before_mcp_auth(self) -> None:
         app = create_app(_settings(), google_client=FakeGoogleOAuthClient())
 
-        async with app.router.lifespan_context(app):
-            async with httpx.AsyncClient(
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app),
                 base_url=PUBLIC_BASE_URL,
-            ) as client:
-                response = await client.post(
-                    "/mcp",
-                    content=b"x" * (MAX_REQUEST_BODY_BYTES + 1),
-                    headers={"Accept": "application/json, text/event-stream"},
-                )
+            ) as client,
+        ):
+            response = await client.post(
+                "/mcp",
+                content=b"x" * (MAX_REQUEST_BODY_BYTES + 1),
+                headers={"Accept": "application/json, text/event-stream"},
+            )
 
         self.assertEqual(response.status_code, 413)
         self.assertEqual(response.headers["content-type"], "application/problem+json")
@@ -107,15 +117,17 @@ class AppLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_rejects_invalid_content_length(self) -> None:
         app = create_app(_settings(), google_client=FakeGoogleOAuthClient())
 
-        async with app.router.lifespan_context(app):
-            async with httpx.AsyncClient(
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app),
                 base_url=PUBLIC_BASE_URL,
-            ) as client:
-                request = client.build_request("POST", "/mcp", content=b"{}")
-                request.headers["content-length"] = "not-a-number"
-                request.headers["x-correlation-id"] = "test-correlation-1"
-                response = await client.send(request)
+            ) as client,
+        ):
+            request = client.build_request("POST", "/mcp", content=b"{}")
+            request.headers["content-length"] = "not-a-number"
+            request.headers["x-correlation-id"] = "test-correlation-1"
+            response = await client.send(request)
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.headers["content-type"], "application/problem+json")
@@ -126,23 +138,25 @@ class AppLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_health_and_readiness_endpoints(self) -> None:
         app = create_app(_settings(), google_client=FakeGoogleOAuthClient())
 
-        async with app.router.lifespan_context(app):
-            async with httpx.AsyncClient(
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app),
                 base_url=PUBLIC_BASE_URL,
-            ) as client:
-                health = await client.get("/healthz")
-                ready = await client.get("/readyz")
+            ) as client,
+        ):
+            health = await client.get("/healthz")
+            ready = await client.get("/readyz")
 
-                self.assertEqual(health.status_code, 200)
-                self.assertEqual(health.json(), {"status": "ok"})
-                self.assertEqual(ready.status_code, 200)
-                self.assertEqual(ready.json(), {"status": "ok"})
+            self.assertEqual(health.status_code, 200)
+            self.assertEqual(health.json(), {"status": "ok"})
+            self.assertEqual(ready.status_code, 200)
+            self.assertEqual(ready.json(), {"status": "ok"})
 
-                app.state.auth_context.conn.close()
-                unavailable = await client.get("/readyz")
-                self.assertEqual(unavailable.status_code, 503)
-                self.assertEqual(unavailable.json(), {"status": "unavailable"})
+            app.state.auth_context.conn.close()
+            unavailable = await client.get("/readyz")
+            self.assertEqual(unavailable.status_code, 503)
+            self.assertEqual(unavailable.json(), {"status": "unavailable"})
 
     async def test_lifespan_closes_sqlite_connection(self) -> None:
         app = create_app(_settings(), google_client=FakeGoogleOAuthClient())
@@ -160,12 +174,14 @@ class AppLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_security_headers_are_attached(self) -> None:
         app = create_app(_settings(), google_client=FakeGoogleOAuthClient())
 
-        async with app.router.lifespan_context(app):
-            async with httpx.AsyncClient(
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app),
                 base_url=PUBLIC_BASE_URL,
-            ) as client:
-                response = await client.get("/healthz")
+            ) as client,
+        ):
+            response = await client.get("/healthz")
 
         for header, expected in SECURITY_RESPONSE_HEADERS.items():
             self.assertEqual(response.headers[header.decode("ascii")], expected.decode("ascii"))
@@ -173,19 +189,115 @@ class AppLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_correlation_id_is_generated_or_preserved(self) -> None:
         app = create_app(_settings(), google_client=FakeGoogleOAuthClient())
 
-        async with app.router.lifespan_context(app):
-            async with httpx.AsyncClient(
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app),
                 base_url=PUBLIC_BASE_URL,
-            ) as client:
-                generated = await client.get("/healthz")
-                preserved = await client.get("/healthz", headers={"X-Correlation-ID": "client.id-123"})
-                sanitized = await client.get("/healthz", headers={"X-Correlation-ID": "bad value with spaces"})
+            ) as client,
+        ):
+            generated = await client.get("/healthz")
+            preserved = await client.get("/healthz", headers={"X-Correlation-ID": "client.id-123"})
+            sanitized = await client.get(
+                "/healthz", headers={"X-Correlation-ID": "bad value with spaces"}
+            )
 
         self.assertRegex(generated.headers["x-correlation-id"], r"^[A-Za-z0-9._-]{1,128}$")
         self.assertEqual(preserved.headers["x-correlation-id"], "client.id-123")
         self.assertRegex(sanitized.headers["x-correlation-id"], r"^[A-Za-z0-9._-]{1,128}$")
         self.assertNotEqual(sanitized.headers["x-correlation-id"], "bad value with spaces")
+
+    async def test_hsts_is_attached_outside_local_environment(self) -> None:
+        app = create_app(_settings(), google_client=FakeGoogleOAuthClient())
+        hsts_name = HSTS_HEADER[0].decode("ascii")
+        hsts_value = HSTS_HEADER[1].decode("ascii")
+
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url=PUBLIC_BASE_URL,
+            ) as client,
+        ):
+            response = await client.get("/healthz")
+
+        self.assertEqual(response.headers[hsts_name], hsts_value)
+
+    async def test_hsts_is_absent_in_local_environment(self) -> None:
+        local_settings = dataclasses.replace(_settings(), environment="local")
+        app = create_app(local_settings, google_client=FakeGoogleOAuthClient())
+        hsts_name = HSTS_HEADER[0].decode("ascii")
+
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url=PUBLIC_BASE_URL,
+            ) as client,
+        ):
+            response = await client.get("/healthz")
+
+        self.assertNotIn(hsts_name, response.headers)
+
+    async def test_mismatched_host_header_is_rejected(self) -> None:
+        app = create_app(_settings(), google_client=FakeGoogleOAuthClient())
+
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="https://attacker.example.com",
+            ) as client,
+        ):
+            response = await client.get("/healthz")
+
+        self.assertEqual(response.status_code, 400)
+
+    async def test_cors_default_denies_cross_origin_credentials(self) -> None:
+        app = create_app(_settings(), google_client=FakeGoogleOAuthClient())
+
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url=PUBLIC_BASE_URL,
+            ) as client,
+        ):
+            response = await client.get(
+                "/healthz",
+                headers={"Origin": "https://evil.example.com"},
+            )
+
+        self.assertNotIn("access-control-allow-origin", response.headers)
+        self.assertNotIn("access-control-allow-credentials", response.headers)
+
+    async def test_cors_allows_only_configured_origin(self) -> None:
+        allowlisted_settings = dataclasses.replace(
+            _settings(), cors_allowed_origins=("https://dashboard.example.com",)
+        )
+        app = create_app(allowlisted_settings, google_client=FakeGoogleOAuthClient())
+
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url=PUBLIC_BASE_URL,
+            ) as client,
+        ):
+            allowed = await client.get(
+                "/healthz",
+                headers={"Origin": "https://dashboard.example.com"},
+            )
+            denied = await client.get(
+                "/healthz",
+                headers={"Origin": "https://evil.example.com"},
+            )
+
+        self.assertEqual(
+            allowed.headers["access-control-allow-origin"], "https://dashboard.example.com"
+        )
+        self.assertNotIn("access-control-allow-credentials", allowed.headers)
+        self.assertNotIn("access-control-allow-origin", denied.headers)
 
 
 if __name__ == "__main__":

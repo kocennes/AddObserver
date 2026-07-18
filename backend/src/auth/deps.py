@@ -13,7 +13,7 @@ just at issuance.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import HTTPException, Request
 
@@ -65,13 +65,19 @@ def verify_access_token(
     if token is None:
         raise BearerTokenError("invalid_token", "Access token bilinmiyor veya iptal edilmis.")
     if token.resource != expected_resource:
-        raise BearerTokenError("invalid_token", "Access token bu kaynak (resource) icin gecerli degil.")
-    if now.astimezone(timezone.utc) >= token.expires_at:
+        raise BearerTokenError(
+            "invalid_token", "Access token bu kaynak (resource) icin gecerli degil."
+        )
+    if now.astimezone(UTC) >= token.expires_at:
         raise BearerTokenError("invalid_token", "Access token suresi dolmus.")
-    return AuthenticatedPrincipal(principal_id=token.principal_id, client_id=token.client_id, scope=token.scope)
+    return AuthenticatedPrincipal(
+        principal_id=token.principal_id, client_id=token.client_id, scope=token.scope
+    )
 
 
-def www_authenticate_header(*, protected_resource_metadata_url: str, error: str | None = None, scope: str | None = None) -> str:
+def www_authenticate_header(
+    *, protected_resource_metadata_url: str, error: str | None = None, scope: str | None = None
+) -> str:
     """Build the canonical ``WWW-Authenticate`` value Anthropic's connector docs expect."""
     parts = ["Bearer"]
     if error:
@@ -82,7 +88,9 @@ def www_authenticate_header(*, protected_resource_metadata_url: str, error: str 
     return ", ".join([parts[0], *parts[1:]])
 
 
-def require_principal(tokens: TokenRepository, *, expected_resource: str, protected_resource_metadata_url: str):
+def require_principal(
+    tokens: TokenRepository, *, expected_resource: str, protected_resource_metadata_url: str
+):
     """FastAPI dependency factory: verifies the request's bearer token or raises 401.
 
     Returns a real transport-level ``401`` (not a ``200`` wrapping an error) per
@@ -97,10 +105,17 @@ def require_principal(tokens: TokenRepository, *, expected_resource: str, protec
             error="invalid_token" if raw_token else None,
         )
         if raw_token is None:
-            raise HTTPException(status_code=401, detail="Authentication required.", headers={"WWW-Authenticate": header})
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication required.",
+                headers={"WWW-Authenticate": header},
+            )
         try:
             return verify_access_token(
-                raw_token, tokens, expected_resource=expected_resource, now=datetime.now(timezone.utc)
+                raw_token,
+                tokens,
+                expected_resource=expected_resource,
+                now=datetime.now(UTC),
             )
         except BearerTokenError as error:
             raise HTTPException(

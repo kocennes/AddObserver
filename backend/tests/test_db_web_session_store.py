@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -15,7 +15,7 @@ from backend.src.db.connection import connect
 from backend.src.db.repository import PrincipalRepository
 from backend.src.db.web_session_store import WebLoginStateRepository, WebSessionRepository
 
-NOW = datetime(2026, 7, 17, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 17, 12, 0, 0, tzinfo=UTC)
 
 
 class WebLoginStateRepositoryTests(unittest.TestCase):
@@ -33,7 +33,8 @@ class WebLoginStateRepositoryTests(unittest.TestCase):
         self.assertEqual(expires_at, NOW + timedelta(minutes=10))
 
     def test_duplicate_claim_is_reported_as_already_consumed(self) -> None:
-        """Zorunlu vaka: login state tek kullanımlıktır -- ikinci redeem denemesi fail-closed olmalı."""
+        """Zorunlu vaka: login state tek kullanımlıktır -- ikinci redeem denemesi fail-closed
+        olmalı."""
         self.states.create("raw-state-1", NOW + timedelta(minutes=10))
         self.states.claim("raw-state-1")
         already_consumed, _ = self.states.claim("raw-state-1")
@@ -83,7 +84,8 @@ class WebSessionRepositoryTests(unittest.TestCase):
         self.assertTrue(lookup.revoked)
 
     def test_two_principals_sessions_are_independent(self) -> None:
-        """İzolasyon: bir principal'in session token'ı başka principal'a çözülemez (farklı token = farklı satır)."""
+        """İzolasyon: bir principal'in session token'ı başka principal'a çözülemez (farklı
+        token = farklı satır)."""
         principal_a = self.principals.get_or_create("https://accounts.google.com", "google-sub-a")
         principal_b = self.principals.get_or_create("https://accounts.google.com", "google-sub-b")
         self.sessions.create(principal_a.id, "token-a", "csrf-a", NOW + timedelta(minutes=30))

@@ -14,17 +14,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from google.ads.googleads.v24.common.types import criteria, metrics as metrics_types, segments as segments_types
-from google.ads.googleads.v24.enums.types import (
-    ad_group_criterion_status as ad_group_criterion_status_enum,
-    ad_group_status as ad_group_status_enum,
-    campaign_status as campaign_status_enum,
-    keyword_match_type as keyword_match_type_enum,
-)
-from google.ads.googleads.v24.resources.types import ad_group, ad_group_criterion, campaign
-from google.ads.googleads.v24.services.types.google_ads_service import GoogleAdsRow, SearchGoogleAdsResponse
-from google.api_core import exceptions as core_exceptions
-
 from backend.src.api.errors import AdsApiError, ErrorClass
 from backend.src.api.queries import DateRange
 from backend.src.api.reporting import (
@@ -33,6 +22,33 @@ from backend.src.api.reporting import (
     GoogleAdsReportingClient,
 )
 from backend.src.api.retry import RetryPolicy
+from google.ads.googleads.v24.common.types import (
+    criteria,
+)
+from google.ads.googleads.v24.common.types import (
+    metrics as metrics_types,
+)
+from google.ads.googleads.v24.common.types import (
+    segments as segments_types,
+)
+from google.ads.googleads.v24.enums.types import (
+    ad_group_criterion_status as ad_group_criterion_status_enum,
+)
+from google.ads.googleads.v24.enums.types import (
+    ad_group_status as ad_group_status_enum,
+)
+from google.ads.googleads.v24.enums.types import (
+    campaign_status as campaign_status_enum,
+)
+from google.ads.googleads.v24.enums.types import (
+    keyword_match_type as keyword_match_type_enum,
+)
+from google.ads.googleads.v24.resources.types import ad_group, ad_group_criterion, campaign
+from google.ads.googleads.v24.services.types.google_ads_service import (
+    GoogleAdsRow,
+    SearchGoogleAdsResponse,
+)
+from google.api_core import exceptions as core_exceptions
 
 
 def _credentials() -> GoogleAdsCredentials:
@@ -48,10 +64,14 @@ def _credentials() -> GoogleAdsCredentials:
 def _campaign_row(*, campaign_id: int, name: str, clicks: int) -> GoogleAdsRow:
     return GoogleAdsRow(
         campaign=campaign.Campaign(
-            id=campaign_id, name=name, status=campaign_status_enum.CampaignStatusEnum.CampaignStatus.ENABLED
+            id=campaign_id,
+            name=name,
+            status=campaign_status_enum.CampaignStatusEnum.CampaignStatus.ENABLED,
         ),
         segments=segments_types.Segments(date="2026-07-01"),
-        metrics=metrics_types.Metrics(impressions=1000, clicks=clicks, cost_micros=250_000, conversions=3.0),
+        metrics=metrics_types.Metrics(
+            impressions=1000, clicks=clicks, cost_micros=250_000, conversions=3.0
+        ),
     )
 
 
@@ -81,7 +101,16 @@ class GoogleAdsReportingClientCampaignTests(unittest.TestCase):
         # Data minimisation: nothing beyond the allowlisted fields leaks through.
         self.assertEqual(
             set(row.keys()),
-            {"date", "campaign_id", "campaign_name", "campaign_status", "impressions", "clicks", "cost_micros", "conversions"},
+            {
+                "date",
+                "campaign_id",
+                "campaign_name",
+                "campaign_status",
+                "impressions",
+                "clicks",
+                "cost_micros",
+                "conversions",
+            },
         )
 
     def test_returns_next_page_token_when_more_rows_exist(self) -> None:
@@ -117,7 +146,9 @@ class GoogleAdsReportingClientCampaignTests(unittest.TestCase):
 
         with self.assertRaises(AdsApiError) as ctx:
             client.get_campaign_performance(
-                customer_id="not-a-customer-id", credentials=_credentials(), date_range=self.date_range
+                customer_id="not-a-customer-id",
+                credentials=_credentials(),
+                date_range=self.date_range,
             )
         self.assertEqual(ctx.exception.code, "invalid_customer_id")
         self.assertEqual(service.calls, [])
@@ -133,7 +164,12 @@ class GoogleAdsReportingClientCampaignTests(unittest.TestCase):
         )
         client = GoogleAdsReportingClient(
             search_service_factory=lambda creds: service,
-            retry_policy=RetryPolicy(max_attempts=3, max_elapsed_seconds=5, base_delay_seconds=0.01, max_delay_seconds=0.01),
+            retry_policy=RetryPolicy(
+                max_attempts=3,
+                max_elapsed_seconds=5,
+                base_delay_seconds=0.01,
+                max_delay_seconds=0.01,
+            ),
         )
 
         result = client.get_campaign_performance(
@@ -184,10 +220,14 @@ class GoogleAdsReportingClientAdGroupAndKeywordTests(unittest.TestCase):
         row = GoogleAdsRow(
             campaign=campaign.Campaign(id=111),
             ad_group=ad_group.AdGroup(
-                id=222, name="Ana Grup", status=ad_group_status_enum.AdGroupStatusEnum.AdGroupStatus.ENABLED
+                id=222,
+                name="Ana Grup",
+                status=ad_group_status_enum.AdGroupStatusEnum.AdGroupStatus.ENABLED,
             ),
             segments=segments_types.Segments(date="2026-07-01"),
-            metrics=metrics_types.Metrics(impressions=10, clicks=2, cost_micros=1000, conversions=0.0),
+            metrics=metrics_types.Metrics(
+                impressions=10, clicks=2, cost_micros=1000, conversions=0.0
+            ),
         )
         service = FakeGoogleAdsSearchService(
             pages_by_token={None: SearchGoogleAdsResponse(results=[row], next_page_token="")}
@@ -214,7 +254,9 @@ class GoogleAdsReportingClientAdGroupAndKeywordTests(unittest.TestCase):
                 ),
             ),
             segments=segments_types.Segments(date="2026-07-01"),
-            metrics=metrics_types.Metrics(impressions=5, clicks=1, cost_micros=500, conversions=1.0),
+            metrics=metrics_types.Metrics(
+                impressions=5, clicks=1, cost_micros=500, conversions=1.0
+            ),
         )
         service = FakeGoogleAdsSearchService(
             pages_by_token={None: SearchGoogleAdsResponse(results=[row], next_page_token="")}

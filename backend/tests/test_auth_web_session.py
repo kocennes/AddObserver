@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -20,7 +20,7 @@ from backend.src.auth.web_session import (
     verify_web_session,
 )
 
-NOW = datetime(2026, 7, 17, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 17, 12, 0, 0, tzinfo=UTC)
 
 
 class LoginStateTests(unittest.TestCase):
@@ -35,7 +35,8 @@ class LoginStateTests(unittest.TestCase):
         redeem_login_state(already_consumed=False, expires_at=state.expires_at, now=NOW)
 
     def test_redeem_rejects_replay(self) -> None:
-        """Zorunlu vaka: login state tek kullanımlıktır -- ikinci redeem denemesi fail-closed olmalı."""
+        """Zorunlu vaka: login state tek kullanımlıktır -- ikinci redeem denemesi fail-closed
+        olmalı."""
         state = issue_login_state(now=NOW)
         with self.assertRaises(AuthError) as ctx:
             redeem_login_state(already_consumed=True, expires_at=state.expires_at, now=NOW)
@@ -73,7 +74,9 @@ class WebSessionTests(unittest.TestCase):
     def test_verify_rejects_unknown_token(self) -> None:
         """Bir WebSessionRepository.lookup miss -- her alan None gelir."""
         with self.assertRaises(AuthError):
-            verify_web_session(principal_id=None, csrf_token_hash=None, expires_at=None, revoked=False, now=NOW)
+            verify_web_session(
+                principal_id=None, csrf_token_hash=None, expires_at=None, revoked=False, now=NOW
+            )
 
     def test_verify_rejects_revoked_session(self) -> None:
         session = issue_web_session("principal-1", now=NOW)

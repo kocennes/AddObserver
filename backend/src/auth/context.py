@@ -9,8 +9,8 @@ between them would be circular.
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
-from typing import Optional
 
 import httpx
 from fastapi import Request
@@ -26,15 +26,15 @@ class AuthContext:
     """Everything a route needs, assembled once by ``app.py`` (or a test)."""
 
     settings: Settings
-    conn: object  # sqlite3.Connection; typed loosely to avoid importing sqlite3 here
+    conn: sqlite3.Connection
     vault: VaultClient
     google_client: GoogleOAuthClient
     http_client: httpx.Client
-    resolve: Optional[Resolver] = None
+    resolve: Resolver | None = None
     #: Separate, ``openid``+``email``-only Google client for the ``/approvals``
     #: browser login (docs/AUTH.md) -- never requests ``adwords`` and never
     #: touches ``vault``/``oauth_credential``/``oauth_client_grant``.
-    login_google_client: Optional[GoogleOAuthClient] = None
+    login_google_client: GoogleOAuthClient | None = None
 
 
 def get_context(request: Request) -> AuthContext:

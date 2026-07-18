@@ -58,14 +58,53 @@ sözleşmesini belirlemek. Endpoint kataloğunun ayrıntısı `API_CONTRACTS.md`
 - Google Ads API ve proposal schema sürümü execution kaydına yazılır; eski proposal sessizce migrate edilmez.
 - Her endpoint/tool için auth, principal isolation, schema, injection, timeout ve audit contract testleri zorunludur.
 
+## Pagination sözleşmesi
+
+`todo.md` 1.5 kararı: sürümleme mevcut path-based `/api/v1/...` biçiminde kalır (header-based
+content negotiation'a geçilmez -- MCP/HTTP istemci ekosisteminde daha az yaygın, ek test/araç
+yükü getirir). Sayfalama hiçbir zaman offset/sayısal index kullanmaz; keyset (`created_at`, `id`)
+konumunu taşıyan, principal/customer/status bağlamına imzalı biçimde bağlı, opak bir cursor
+kullanılır:
+
+- Cursor `backend/src/api/pagination.py::encode_cursor`/`decode_cursor` ile üretilir/doğrulanır.
+  İçerik JSON'dur (`principal_id`, `customer_id`, `status`, `after_created_at`, `after_id`,
+  `issued_at`), HMAC-SHA256 ile imzalanır ve base64url ile taşınır -- ne ham offset ne düz metin
+  pozisyon bilgisi client'a sızar.
+- İmza anahtarı vault key'inden (`Settings.local_vault_key`) HKDF-benzeri sabit bir "info" etiketiyle
+  türetilir (`hmac.new(vault_key, b"addobserver-api-pagination-cursor-v1", sha256)`); vault'un kendi
+  Fernet anahtarı asla doğrudan başka bir amaç için yeniden kullanılmaz (anahtar ayrımı), ayrıca yeni
+  bir zorunlu ortam değişkeni/secret provizyonu eklemez.
+- Cursor 15 dakika (`CURSOR_TTL`) geçerlidir ve yalnız üretildiği principal/customer_id/status
+  bağlamında geçerlidir; farklı bir principal, customer_id veya durumla tekrar kullanılırsa,
+  imzası bozulmuşsa veya süresi dolmuşsa hepsi AYNI genel `invalid_cursor` hatasına düşer -- hangi
+  kontrolün başarısız olduğu asla açığa çıkmaz (başka bir principal'ın verisinin var olup
+  olmadığını sızdırmamak için, docs/SECURITY.md).
+- `GET /api/v1/proposals` bu sözleşmeyi uygular: `next_cursor` yalnız gösterilecek daha fazla satır
+  varsa response'a eklenir; `cursor` query parametresi verilirse bir önceki sayfanın konumundan
+  devam eder. `backend/src/db/proposals.py::ProposalRepository.list_pending` `limit+1` satır çekip
+  keyset `WHERE (created_at, id) > (?, ?)` ile devam eder -- asla `OFFSET` kullanmaz.
+- Google Ads reporting tool'ları (`api/reporting.py`) zaten Google'ın kendi opak `page_token`'ını
+  kullanıyor (offset değil); bu, aynı "asla offset yok" ilkesini kod değişikliği gerekmeden zaten
+  karşılıyor -- yalnız bu belgeye çapraz referanslandı.
+
 ## Açık sorular
 
 - HTTP framework (Python varsayımıyla aday FastAPI) ve OpenAPI breaking-change aracı.
 - UI için aynı-origin cookie session mı, ayrı BFF mi kullanılacağı.
-- Public MCP endpoint path/versioning ve ayrı internal admin API ihtiyacı.
+- Ayrı internal admin API ihtiyacı.
 - İlk desteklenecek mutate allowlist'i.
 
 ## Güncelleme geçmişi
+
+- 2026-07-18 — Faz 1.5: "Public MCP endpoint path/versioning" sorusu kapatıldı -- mevcut path-based
+  `/api/v1/...` sürümleme korunur; yeni "Pagination sözleşmesi" bölümü opak, imzalı, principal/
+  customer/status/expiry'e bağlı keyset cursor kararını ekliyor. `GET /api/v1/proposals` bu
+  sözleşmeye göre uygulandı (`backend/src/api/pagination.py`, `backend/tests/test_api_pagination.py`,
+  `backend/tests/test_api_http_routes.py`). MCP `list_proposals` tool'u aynı `has_more` sinyalini
+  taşır ama HTTP'nin tam cursor sözleşmesini henüz uygulamaz -- bu `todo.md` 6.1'e (MCP tool
+  sözleşme denetimi) bırakıldı.
+- 2026-07-18 — Public opaque kimlik girdileri URL-safe karakterlerle ve 128 karakter üst sınırıyla
+  sınırlandırıldı; HTTP, MCP ve approval form yolları aynı doğrulamayı kullanır.
 
 - 2026-07-17 — Public HTTP ingress için 1 MiB request body sınırı ve güvenli problem response sözleşmesi eklendi.
 - 2026-07-17 — Public HTTP responses için `X-Correlation-ID` üretme/echo etme ve problem response korelasyonu eklendi.

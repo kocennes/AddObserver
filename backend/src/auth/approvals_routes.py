@@ -11,13 +11,13 @@ scope and never touches the stored Ads credential (see that module's docstring).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from html import escape
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from ..api.identifiers import validate_opaque_id
 from ..approval import ApprovalError, Decision, Proposal, approve_proposal
 from ..db.models import AuditEvent
 from ..db.oauth_store import TokenRepository
@@ -48,8 +48,8 @@ def _error_page(title: str, description: str, status_code: int = 400) -> HTMLRes
 
 
 async def handle_web_login_callback(
-    state: str, *, code: Optional[str], error: Optional[str], context: AuthContext
-) -> RedirectResponse:
+    state: str, *, code: str | None, error: str | None, context: AuthContext
+) -> HTMLResponse | RedirectResponse:
     """The ``/approvals`` login fallback leg of ``/google/callback`` (called from ``server.py``
     when ``state`` doesn't match a pending Claude-client ``authorization_transaction``).
 
@@ -61,9 +61,11 @@ async def handle_web_login_callback(
     """
     claimed = WebLoginStateRepository(context.conn).claim(state)
     if claimed is None:
-        return _error_page("İşlem bulunamadı", "Google geri çağrısı bilinmeyen bir işlem içeriyor.", 400)
+        return _error_page(
+            "İşlem bulunamadı", "Google geri çağrısı bilinmeyen bir işlem içeriyor.", 400
+        )
     already_consumed, expires_at = claimed
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     try:
         redeem_login_state(already_consumed=already_consumed, expires_at=expires_at, now=now)
     except AuthError as login_error:
@@ -79,7 +81,9 @@ async def handle_web_login_callback(
     except Exception:  # noqa: BLE001 -- never leak raw Google/library errors to the browser
         return _error_page("Google girişi başarısız", "Google ile giriş tamamlanamadı.", 400)
 
-    principal = PrincipalRepository(context.conn).get("https://accounts.google.com", google_result.google_subject)
+    principal = PrincipalRepository(context.conn).get(
+        "https://accounts.google.com", google_result.google_subject
+    )
     if principal is None:
         return _error_page(
             "Bağlantı bulunamadı",
@@ -88,7 +92,9 @@ async def handle_web_login_callback(
         )
 
     session = issue_web_session(principal.id, now=now)
-    WebSessionRepository(context.conn).create(principal.id, session.token, session.csrf_token, session.expires_at)
+    WebSessionRepository(context.conn).create(
+        principal.id, session.token, session.csrf_token, session.expires_at
+    )
     response = RedirectResponse(url="/approvals", status_code=302)
     response.set_cookie(
         WEB_SESSION_COOKIE,
@@ -121,7 +127,7 @@ async def login(context: AuthContext = Depends(get_context)):
     """
     if context.login_google_client is None:
         return _error_page("Yapılandırma hatası", "Giriş istemcisi yapılandırılmamış.", 500)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     login_state = issue_login_state(now=now)
     WebLoginStateRepository(context.conn).create(login_state.state, login_state.expires_at)
     url = context.login_google_client.build_authorization_url(state=login_state.state)
@@ -138,7 +144,7 @@ def _require_session(request: Request, context: AuthContext) -> AuthenticatedWeb
         csrf_token_hash=lookup.csrf_token_hash,
         expires_at=lookup.expires_at,
         revoked=lookup.revoked,
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
 
 
@@ -162,13 +168,13 @@ async def list_approvals(request: Request, context: AuthContext = Depends(get_co
     except AuthError:
         return RedirectResponse(url="/login", status_code=302)
 
-    pending = ProposalRepository(context.conn).list_pending(session.principal_id)
+    pending = ProposalRepository(context.conn).list_pending(session.principal_id).proposals
     csrf_cookie = request.cookies.get(WEB_CSRF_COOKIE)
     try:
         verify_csrf_token(csrf_cookie, session.csrf_token_hash)
     except AuthError:
         return RedirectResponse(url="/login", status_code=302)
-    assert csrf_cookie is not None
+    assert csrf_cookie is not None  # nosec B101 -- verify_csrf_token above already rejected None
     csrf = escape(csrf_cookie)
     rows: list[str] = []
     for proposal in pending:
@@ -226,13 +232,11 @@ async def disconnect(
         accounts=AdsAccountRepository(context.conn),
         vault=context.vault,
         audit=AuditRepository(context.conn),
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
+        web_sessions=WebSessionRepository(context.conn),
         correlation_id=_request_correlation_id(request),
     )
 
-    raw_token = request.cookies.get(WEB_SESSION_COOKIE)
-    if raw_token:
-        WebSessionRepository(context.conn).revoke(raw_token)
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie(WEB_SESSION_COOKIE, path="/")
     response.delete_cookie(WEB_CSRF_COOKIE, path="/")
@@ -255,17 +259,24 @@ async def decide_proposal(
     except AuthError as error:
         return _error_page("Yetkisiz", str(error), 401)
 
-    proposals = ProposalRepository(context.conn)
-    proposal = proposals.get(session.principal_id, proposal_id)
-    if proposal is None:
+    try:
+        validate_opaque_id(proposal_id, field_name="proposal_id")
+    except ValueError:
         return _error_page("Bulunamadı", "Bu öneri bulunamadı veya bu bağlantıya ait değil.", 404)
 
     try:
         decision_enum = Decision(decision)
     except ValueError:
-        return _error_page("Geçersiz karar", "decision yalnız 'approve' veya 'reject' olabilir.", 400)
+        return _error_page(
+            "Geçersiz karar", "decision yalnız 'approve' veya 'reject' olabilir.", 400
+        )
 
-    now = datetime.now(timezone.utc)
+    proposals = ProposalRepository(context.conn)
+    proposal = proposals.get(session.principal_id, proposal_id)
+    if proposal is None:
+        return _error_page("Bulunamadı", "Bu öneri bulunamadı veya bu bağlantıya ait değil.", 404)
+
+    now = datetime.now(UTC)
     try:
         updated_proposal, approval = approve_proposal(
             proposal,
@@ -312,7 +323,7 @@ async def logout(
         return _error_page("Yetkisiz", str(error), 401)
 
     raw_token = request.cookies.get(WEB_SESSION_COOKIE)
-    assert raw_token is not None
+    assert raw_token is not None  # nosec B101 -- _require_session above already required this cookie
     WebSessionRepository(context.conn).revoke(raw_token)
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie(WEB_SESSION_COOKIE, path="/")

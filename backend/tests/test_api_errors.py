@@ -15,21 +15,20 @@ import grpc
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from backend.src.api.errors import (
+    ErrorClass,
+    classify_google_ads_exception,
+    classify_transport_error,
+)
 from google.ads.googleads.errors import GoogleAdsException
-from google.ads.googleads.v24.errors.types import errors as error_types
 from google.ads.googleads.v24.errors.types import (
     authentication_error,
     internal_error,
     quota_error,
     request_error,
 )
+from google.ads.googleads.v24.errors.types import errors as error_types
 from google.api_core import exceptions as core_exceptions
-
-from backend.src.api.errors import (
-    ErrorClass,
-    classify_google_ads_exception,
-    classify_transport_error,
-)
 
 
 class _FakeRpcCall(grpc.Call, grpc.RpcError):
@@ -43,7 +42,9 @@ class _FakeRpcCall(grpc.Call, grpc.RpcError):
         return "fake"
 
 
-def _exception_for(error: error_types.GoogleAdsError, *, request_id: str = "req-1") -> GoogleAdsException:
+def _exception_for(
+    error: error_types.GoogleAdsError, *, request_id: str = "req-1"
+) -> GoogleAdsException:
     failure = error_types.GoogleAdsFailure(errors=[error], request_id=request_id)
     call = _FakeRpcCall(grpc.StatusCode.INVALID_ARGUMENT)
     return GoogleAdsException(error=call, call=call, failure=failure, request_id=request_id)
@@ -163,6 +164,21 @@ class ClassifyTransportErrorTests(unittest.TestCase):
         result = classify_transport_error(RuntimeError("kim bilir"))
         self.assertEqual(result.error_class, ErrorClass.VALIDATION)
         self.assertFalse(result.retryable)
+
+    def test_unrecognised_exception_text_never_reaches_the_public_message(self) -> None:
+        """A transport library could embed a request URL, header or credential
+
+        fragment in its own exception message (docs/SECURITY.md -- secrets never
+        reach a public response). ``classify_transport_error``'s fallback branch
+        must return its own fixed, safe message regardless of what the original
+        exception says -- never ``str(exc)``.
+        """
+        secret_bearing_exc = RuntimeError(
+            "token=SECRET-MARKER-do-not-print-9f3a7c leaked in transport layer"
+        )
+        result = classify_transport_error(secret_bearing_exc)
+        self.assertNotIn("SECRET-MARKER-do-not-print-9f3a7c", result.message)
+        self.assertNotIn("SECRET-MARKER-do-not-print-9f3a7c", result.code)
 
 
 if __name__ == "__main__":

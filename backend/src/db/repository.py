@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .models import AdsAccount, CredentialStatus, OAuthCredential, Principal, PrincipalStatus
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _new_id() -> str:
@@ -47,10 +47,11 @@ class PrincipalRepository:
             issuer=issuer,
             subject=subject,
             status=PrincipalStatus.ACTIVE,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         self._conn.execute(
-            "INSERT INTO principal (id, issuer, subject, status, created_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO principal (id, issuer, subject, status, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
             (principal.id, principal.issuer, principal.subject, principal.status.value, _now()),
         )
         self._conn.commit()
@@ -86,12 +87,15 @@ class AdsAccountRepository:
         if existing is not None:
             if existing.status != "active" or existing.login_customer_id != login_customer_id:
                 self._conn.execute(
-                    "UPDATE ads_account SET status = ?, login_customer_id = ? WHERE id = ? AND principal_id = ?",
+                    "UPDATE ads_account SET status = ?, login_customer_id = ? "
+                    "WHERE id = ? AND principal_id = ?",
                     ("active", login_customer_id, existing.id, principal_id),
                 )
                 self._conn.commit()
+                # The row just updated by (id, principal_id) above did not change
+                # principal_id/customer_id, so this re-fetch must find it.
                 refreshed = self.get_account(principal_id, customer_id)
-                assert refreshed is not None
+                assert refreshed is not None  # nosec B101
                 return refreshed
             return existing
         account = AdsAccount(
@@ -100,21 +104,27 @@ class AdsAccountRepository:
             customer_id=customer_id,
             login_customer_id=login_customer_id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         self._conn.execute(
-            "INSERT INTO ads_account (id, principal_id, customer_id, login_customer_id, status, created_at) "
+            "INSERT INTO ads_account "
+            "(id, principal_id, customer_id, login_customer_id, status, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             (
-                account.id, account.principal_id, account.customer_id,
-                account.login_customer_id, account.status, _now(),
+                account.id,
+                account.principal_id,
+                account.customer_id,
+                account.login_customer_id,
+                account.status,
+                _now(),
             ),
         )
         self._conn.commit()
         return account
 
     def get_account(self, principal_id: str, customer_id: str) -> AdsAccount | None:
-        """Return the account row for history/admin use, regardless of active/disconnected status."""
+        """Return the account row for history/admin use, regardless of active/disconnected
+        status."""
         row = self._conn.execute(
             "SELECT * FROM ads_account WHERE principal_id = ? AND customer_id = ?",
             (principal_id, customer_id),
@@ -186,14 +196,19 @@ class OAuthCredentialRepository:
             vault_ref=vault_ref,
             status=CredentialStatus.ACTIVE,
             key_version=key_version,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         self._conn.execute(
-            "INSERT INTO oauth_credential (id, principal_id, vault_ref, status, key_version, created_at) "
+            "INSERT INTO oauth_credential "
+            "(id, principal_id, vault_ref, status, key_version, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             (
-                credential.id, credential.principal_id, credential.vault_ref,
-                credential.status.value, credential.key_version, _now(),
+                credential.id,
+                credential.principal_id,
+                credential.vault_ref,
+                credential.status.value,
+                credential.key_version,
+                _now(),
             ),
         )
         self._conn.commit()

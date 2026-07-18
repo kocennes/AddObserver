@@ -69,16 +69,19 @@ Connector Authorization Server                    ▼
 
 ## Açık sorular
 
-- Authorization server ürünü/kütüphanesi ve connector subject'in kalıcı kimlik kaynağı.
 - Hosting/region, public domain ve Google/Anthropic egress/WAF gereksinimleri.
 - Faz 1'de write tool bulunup bulunmayacağı.
-- `/approvals`'ın ötesinde daha zengin bir onboarding/account-management web dashboard'u
-  gerekip gerekmediği (bkz. `docs/DESIGN.md`) -- insan onayının *nerede* gerçekleştiği artık
-  kapalı bir soru değil, yalnız bu minimal sayfanın ötesinde bir tasarım genişletmesi olup
-  olmayacağı açık.
 
 ## Güncelleme geçmişi
 
+- 2026-07-18 — Faz 1.2: "Authorization server ürünü/kütüphanesi ve connector subject'in kalıcı
+  kimlik kaynağı" sorusu kapatıldı. AS ürünü/kütüphanesi zaten `docs/decisions/0001-backend-stack.md`
+  ile Authlib olarak kapanmıştı; connector subject'in kalıcı kimlik kaynağı şimdi
+  `docs/decisions/0005-principal-identity-no-merge-no-recovery.md` ile kapandı (Google `sub`, kalıcı,
+  merge/recovery bypass'ı yok).
+- 2026-07-18 — Faz 1.3: "`/approvals`'ın ötesinde daha zengin bir dashboard gerekip gerekmediği"
+  sorusu kapatıldı -- Faz 1'de yalnız minimal `/approvals` kalır, ayrı dashboard/MCP Apps UI
+  eklenmez (bkz. `docs/DESIGN.md` "Güncelleme geçmişi", `docs/PRODUCT.md` "Açık sorular").
 - 2026-07-17 — Mimari public Streamable HTTP connector, çift OAuth ve user-principal izolasyonuna çevrildi.
 - 2026-07-17 — Ürün sahibi onayıyla Kabul edildi durumuna geçirildi.
 - 2026-07-17 — "Write yolu"nun ilk adımı (`prepare_proposal`/`get_proposal` MCP tool'ları) uygulandı. Bu

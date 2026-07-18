@@ -41,7 +41,7 @@ edilebilir veri sözleşmelerini tanımlamak.
 |---|---|---|
 | `GET /api/v1/accounts` | Yetkili Ads hesapları | Principal-scoped, yalnız active hesaplar, uygulandı |
 | `POST /api/v1/analyses` | Analiz başlat | Rate limit, idempotency |
-| `GET /api/v1/proposals` | Önerileri listele | Principal + customer scope, uygulandı |
+| `GET /api/v1/proposals` | Önerileri listele | Principal + customer scope, opak cursor pagination, uygulandı |
 | `GET /api/v1/proposals/{id}` | Değişiklik önizle | Ownership check, uygulandı |
 | `POST /api/v1/proposals/{id}/decisions` | Onay/red | CSRF, role, immutable hash |
 | `POST /api/v1/proposals/{id}/executions` | Onaylı değişikliği uygula | Revalidation, idempotency, audit |
@@ -81,6 +81,9 @@ Execution endpoint'i ham Google Ads mutate payload kabul etmez; yalnız önceden
 ```
 
 Modelin gönderdiği `customer_id`, `resource_name`, `before` ve bütçe değeri backend tarafından yeniden doğrulanır.
+`rationale` en fazla 2000 karakter olabilir ve kontrol karakteri içeremez; durum değişikliği önerilerinde
+`current_status` yalnız Google Ads'in gerçek `CampaignStatus` değerlerinden (`ENABLED`/`PAUSED`/`REMOVED`)
+biri olabilir; `campaign_id` en fazla 19 haneli (`int64`) sayısal bir kimlik olmalıdır.
 
 ## Uyum ve sürümleme
 
@@ -94,6 +97,16 @@ Modelin gönderdiği `customer_id`, `resource_name`, `before` ve bütçe değeri
 - Public MCP dışında ayrı kullanıcı-facing HTTP API yayınlanıp yayınlanmayacağı.
 
 ## Güncelleme geçmişi
+
+- 2026-07-18 — Faz 1.5: `GET /api/v1/proposals` opak, imzalı keyset cursor pagination'ı uyguladı
+  (bkz. `docs/API_DESIGN.md` "Pagination sözleşmesi"); daha önce yalnız `limit` ile sınırlı, ilk
+  sayfanın ötesine geçemeyen ad hoc davranışın yerini aldı. `next_cursor` yalnız daha fazla satır
+  varsa döner; farklı principal/customer/status için üretilmiş veya süresi dolmuş bir cursor aynı
+  genel `invalid_cursor` hatasıyla reddedilir.
+- 2026-07-18 — Öneri şemasında `rationale`, `current_status` ve `campaign_id` için sınır değer/allowlist
+  doğrulaması eklendi (bkz. yukarı, "Öneri şeması — asgari alanlar").
+- 2026-07-18 — `proposal_id` girdileri bütün public yüzeylerde 1–128 karakterlik URL-safe opaque
+  kimlik olarak sınırlandırıldı; geçersiz HTTP girdisi `invalid_proposal_id` problem cevabı üretir.
 
 - 2026-07-18 — HTTP/MCP read ve proposal yolları `disconnected` hesap satırlarını erişimden dışlar;
   tekrar bağlantı aynı customer satırını `active` olarak canlandırır.

@@ -23,7 +23,22 @@ from .domain import ApprovalError
 #: silently reinterpreting an old proposal's payload under a new schema.
 PROPOSAL_SCHEMA_VERSION = 1
 
-_CAMPAIGN_ID_RE = re.compile(r"^\d+$")
+#: A short justification, not a document -- bounded so a compromised/careless MCP
+#: client cannot use the stored proposal payload as unbounded storage, and so a
+#: later approval-page render (Faz 7.1) has a known worst-case size to escape.
+MAX_RATIONALE_LENGTH = 2000
+#: Google Ads resource IDs are ``int64``; 19 digits covers the full range.
+MAX_CAMPAIGN_ID_DIGITS = 19
+
+_CAMPAIGN_ID_RE = re.compile(rf"^\d{{1,{MAX_CAMPAIGN_ID_DIGITS}}}$")
+#: C0 controls and DEL -- ``rationale`` is stored verbatim and may reach logs/audit
+#: rows and a future HTML render, so control characters (incl. newlines used for
+#: log-injection-style smuggling) are rejected the same way approval-form fields are.
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
+#: The only ``current_status`` values Google Ads actually reports for a campaign
+#: (docs/API_CONTRACTS.md); free text here would let the "observed current state"
+#: field become untrusted narrative text.
+_CAMPAIGN_STATUS_VALUES = frozenset({"ENABLED", "PAUSED", "REMOVED"})
 
 
 class ProposalType(StrEnum):
@@ -56,22 +71,40 @@ def build_proposal_payload(
     on ``.code`` the same way it already does for e.g. ``approval_required``.
     """
     if not campaign_id or not _CAMPAIGN_ID_RE.match(campaign_id):
-        raise ApprovalError("invalid_campaign_id", "campaign_id sayisal bir Google Ads kimligi olmalidir.")
+        raise ApprovalError(
+            "invalid_campaign_id", "campaign_id sayisal bir Google Ads kimligi olmalidir."
+        )
     if not rationale or not rationale.strip():
         raise ApprovalError(
-            "missing_rationale", "Oneri, hangi kaynak metriklere dayandigini aciklayan bir rationale icermelidir."
+            "missing_rationale",
+            "Oneri, hangi kaynak metriklere dayandigini aciklayan bir rationale icermelidir.",
         )
+    if len(rationale) > MAX_RATIONALE_LENGTH:
+        raise ApprovalError(
+            "rationale_too_long", f"rationale en fazla {MAX_RATIONALE_LENGTH} karakter olabilir."
+        )
+    if _CONTROL_CHAR_RE.search(rationale):
+        raise ApprovalError("invalid_rationale", "rationale kontrol karakteri iceremez.")
 
     try:
         proposal_type_enum = ProposalType(proposal_type)
     except ValueError as error:
         allowed = ", ".join(member.value for member in ProposalType)
-        raise ApprovalError("invalid_proposal_type", f"proposal_type su degerlerden biri olmalidir: {allowed}.") from error
+        raise ApprovalError(
+            "invalid_proposal_type", f"proposal_type su degerlerden biri olmalidir: {allowed}."
+        ) from error
 
     if proposal_type_enum in _TARGET_STATUS:
-        before, after = _status_change(proposal_type_enum, current_status, current_budget_amount_micros, proposed_budget_amount_micros)
+        before, after = _status_change(
+            proposal_type_enum,
+            current_status,
+            current_budget_amount_micros,
+            proposed_budget_amount_micros,
+        )
     else:
-        before, after = _budget_change(current_status, current_budget_amount_micros, proposed_budget_amount_micros)
+        before, after = _budget_change(
+            current_status, current_budget_amount_micros, proposed_budget_amount_micros
+        )
 
     return {
         "schema_version": PROPOSAL_SCHEMA_VERSION,
@@ -90,14 +123,24 @@ def _status_change(
     proposed_budget_amount_micros: int | None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if current_budget_amount_micros is not None or proposed_budget_amount_micros is not None:
-        raise ApprovalError("invalid_proposal_payload", "Durum degisikligi onerisi butce alani iceremez.")
+        raise ApprovalError(
+            "invalid_proposal_payload", "Durum degisikligi onerisi butce alani iceremez."
+        )
     if not current_status or not current_status.strip():
         raise ApprovalError(
-            "missing_current_status", "current_status, gozlemlenen mevcut kampanya durumunu icermelidir."
+            "missing_current_status",
+            "current_status, gozlemlenen mevcut kampanya durumunu icermelidir.",
+        )
+    if current_status not in _CAMPAIGN_STATUS_VALUES:
+        allowed = ", ".join(sorted(_CAMPAIGN_STATUS_VALUES))
+        raise ApprovalError(
+            "invalid_current_status", f"current_status su degerlerden biri olmalidir: {allowed}."
         )
     target_status = _TARGET_STATUS[proposal_type]
     if current_status == target_status:
-        raise ApprovalError("proposal_is_noop", "current_status zaten hedeflenen durumda; oneriye gerek yok.")
+        raise ApprovalError(
+            "proposal_is_noop", "current_status zaten hedeflenen durumda; oneriye gerek yok."
+        )
     return {"status": current_status}, {"status": target_status}
 
 
@@ -107,16 +150,24 @@ def _budget_change(
     proposed_budget_amount_micros: int | None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if current_status is not None:
-        raise ApprovalError("invalid_proposal_payload", "Butce onerisi current_status alani iceremez.")
+        raise ApprovalError(
+            "invalid_proposal_payload", "Butce onerisi current_status alani iceremez."
+        )
     if current_budget_amount_micros is None or proposed_budget_amount_micros is None:
         raise ApprovalError(
             "missing_budget_amount",
-            "Butce onerisi current_budget_amount_micros ve proposed_budget_amount_micros gerektirir.",
+            "Butce onerisi current_budget_amount_micros ve "
+            "proposed_budget_amount_micros gerektirir.",
         )
     if current_budget_amount_micros < 0 or proposed_budget_amount_micros <= 0:
         raise ApprovalError(
-            "invalid_budget_amount", "Butce tutarlari negatif olamaz; hedef tutar sifirdan buyuk olmalidir."
+            "invalid_budget_amount",
+            "Butce tutarlari negatif olamaz; hedef tutar sifirdan buyuk olmalidir.",
         )
     if current_budget_amount_micros == proposed_budget_amount_micros:
-        raise ApprovalError("proposal_is_noop", "Hedef butce mevcut butceyle ayni; oneriye gerek yok.")
-    return {"amount_micros": current_budget_amount_micros}, {"amount_micros": proposed_budget_amount_micros}
+        raise ApprovalError(
+            "proposal_is_noop", "Hedef butce mevcut butceyle ayni; oneriye gerek yok."
+        )
+    return {"amount_micros": current_budget_amount_micros}, {
+        "amount_micros": proposed_budget_amount_micros
+    }

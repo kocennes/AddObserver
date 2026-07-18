@@ -1,4 +1,5 @@
-"""Assembles the auth-protected ``/mcp`` Streamable HTTP app (docs/MCP.md, docs/CONNECTOR_SUBMISSION.md).
+"""Assembles the auth-protected ``/mcp`` Streamable HTTP app (docs/MCP.md,
+docs/CONNECTOR_SUBMISSION.md).
 
 Single public endpoint, matching ``docs/CONNECTOR_SUBMISSION.md`` ("Tek public
 endpoint: https://<domain>/mcp, Streamable HTTP"). Auth is deliberately left
@@ -85,7 +86,9 @@ def build_mcp_server(
     return mcp
 
 
-def wrap_with_principal_auth(mcp: FastMCP, *, settings: Settings, conn: sqlite3.Connection) -> ASGIApp:
+def wrap_with_principal_auth(
+    mcp: FastMCP, *, settings: Settings, conn: sqlite3.Connection
+) -> ASGIApp:
     """Return ``mcp``'s Streamable HTTP ASGI app behind the connector's own bearer-token check.
 
     Calling ``mcp.streamable_http_app()`` here (rather than in
@@ -94,7 +97,9 @@ def wrap_with_principal_auth(mcp: FastMCP, *, settings: Settings, conn: sqlite3.
     lifespan *after* calling this function, or the mounted app will 500 on
     every request (no running session manager to hand requests to).
     """
-    protected_resource_metadata_url = f"{settings.public_base_url.rstrip('/')}/.well-known/oauth-protected-resource"
+    protected_resource_metadata_url = (
+        f"{settings.public_base_url.rstrip('/')}/.well-known/oauth-protected-resource"
+    )
     return PrincipalAuthMiddleware(
         mcp.streamable_http_app(),
         tokens_factory=lambda: TokenRepository(conn),

@@ -10,22 +10,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 
-class PrincipalStatus(str, Enum):
+class PrincipalStatus(StrEnum):
     ACTIVE = "active"
     DISABLED = "disabled"
 
 
-class CredentialStatus(str, Enum):
+class CredentialStatus(StrEnum):
     PENDING = "pending"
     ACTIVE = "active"
     REVOKED = "revoked"
     INVALID = "invalid"
 
 
-class ExecutionStatus(str, Enum):
+class ExecutionStatus(StrEnum):
     """DATABASE.md kararı: execution outbox ``pending -> applied|failed|unknown`` ilerler."""
 
     PENDING = "pending"

@@ -89,15 +89,26 @@ tasarım standardını belirlemek.
 
 ## Açık sorular
 
-- İlk fazda ayrı, tasarım sistemi uygulanmış bir web dashboard olup olmayacağı; connector
-  consent/onboarding ekranlarının marka sistemi. `/approvals` (docs/AUTH.md, docs/ARCHITECTURE.md)
-  bu sorunun yerine geçmez -- yalnız anlık onay-kapısı ihtiyacını karşılayan, stilsiz/minimal
-  semantik HTML'dir (gerçek `<form>`/`<button>`, aksiyon belirten buton metni, tek sütun); yukarıdaki
-  görsel token/spacing/kontrast sistemi ona henüz uygulanmadı.
-- MCP Apps kullanılırsa Anthropic cross-platform tasarım gereksinimleri.
+- MCP Apps kullanılırsa Anthropic cross-platform tasarım gereksinimleri (bugün MCP Apps
+  kullanılmadığı için uygulanmaz durumda, bkz. Güncelleme geçmişi).
 
 ## Güncelleme geçmişi
 
+- 2026-07-18 — Faz 1.3: "İlk fazda ayrı, tasarım sistemi uygulanmış bir web dashboard olup
+  olmayacağı" sorusu kapatıldı: **Faz 1'de yaratılmaz.** Deneyimin tamamı Claude içi tool
+  akışında ve mevcut minimal/stilsiz semantik `/approvals` onay sayfasında kalır; yeni bir
+  frontend framework veya marka tasarım sistemi eklenmez. Gerekçe: (1) `/approvals` zaten
+  erişilebilirlik/onay ilkelerini karşılıyor (bkz. aşağıdaki 2026-07-17 notu), ayrı bir
+  dashboard bugün hiçbir kabul kriterini karşılamak için ZORUNLU değil; (2) Faz 1 kapsamı
+  reporting + local proposal'dır (`docs/PRODUCT.md`), account-management/onboarding
+  dashboard'unun asıl gerekçesi olan gerçek Google Ads write henüz açık değil
+  (`docs/GOOGLE_API_ACCESS.md`, RMF sınıflandırması bekleniyor); (3) yeni bir frontend
+  yüzeyi ek bakım yükü, erişilebilirlik test yüzeyi ve Anthropic submission incelemesi
+  gerektirir, kapsam netleşmeden bu maliyeti üstlenmek erken. MCP Apps UI de aynı gerekçeyle
+  Faz 1'e eklenmez. Yeniden değerlendirme tetikleyicisi: `todo.md` 1.1/8.x write kapsamı
+  açılırsa veya kullanıcı geri bildirimi `/approvals`'ın yetersiz kaldığını gösterirse.
+  Kod değişikliği yoktur. `docs/ARCHITECTURE.md` ve `docs/PRODUCT.md` "Açık sorular"
+  bölümleri de bu kararla güncellendi.
 - 2026-07-17 — `/approvals`'ın minimal, semantik HTML ile Onay etkileşimi/erişilebilirlik
   ilkelerini karşıladığı, ayrı tasarım sistemli dashboard sorusunun ise açık kaldığı not edildi.
 - 2026-07-17 — Public connector consent ve Claude içi deneyim bağlamı eklendi.

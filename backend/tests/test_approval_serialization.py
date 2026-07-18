@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -22,7 +22,7 @@ from backend.src.approval import (
 
 class ProposalSerializationTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.now = datetime(2026, 7, 17, 12, tzinfo=timezone.utc)
+        self.now = datetime(2026, 7, 17, 12, tzinfo=UTC)
         self.payload = {
             "schema_version": "1",
             "type": "campaign_pause",
@@ -44,7 +44,9 @@ class ProposalSerializationTests(unittest.TestCase):
         )
         return submit_proposal(draft, now=self.now)
 
-    def test_proposal_status_for_read_reports_time_based_expiry_without_mutating_status(self) -> None:
+    def test_proposal_status_for_read_reports_time_based_expiry_without_mutating_status(
+        self,
+    ) -> None:
         proposal = self._proposal(expires_at=self.now + timedelta(minutes=1))
 
         status = proposal_status_for_read(proposal, now=self.now + timedelta(minutes=2))
@@ -61,7 +63,7 @@ class ProposalSerializationTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "invalid_time")
 
     def test_proposal_to_dict_excludes_principal_and_includes_payload_snapshot(self) -> None:
-        proposal = self._proposal(expires_at=datetime.now(timezone.utc) + timedelta(minutes=30))
+        proposal = self._proposal(expires_at=datetime.now(UTC) + timedelta(minutes=30))
 
         serialized = proposal_to_dict(proposal)
 

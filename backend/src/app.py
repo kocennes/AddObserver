@@ -16,17 +16,19 @@ from __future__ import annotations
 
 import re
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from typing import Any
 
 import httpx
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .api.problems import problem_response
-from .api.routes import router as api_router
 from .api.reporting import GoogleAdsReportingClient
+from .api.routes import router as api_router
 from .auth.approvals_routes import router as approvals_router
 from .auth.google_oauth import GOOGLE_SCOPES, GoogleOAuthClient, GoogleWebFlowOAuthClient
 from .auth.server import AuthContext
@@ -39,7 +41,9 @@ from .mcp.server import build_mcp_server, wrap_with_principal_auth
 #: Scopes for the ``/approvals`` browser login only -- deliberately excludes
 #: ``adwords`` (docs/AUTH.md): this flow only proves "this browser belongs to
 #: principal X", it never re-authorizes or touches Google Ads access.
-_LOGIN_ONLY_SCOPES = tuple(scope for scope in GOOGLE_SCOPES if scope != "https://www.googleapis.com/auth/adwords")
+_LOGIN_ONLY_SCOPES = tuple(
+    scope for scope in GOOGLE_SCOPES if scope != "https://www.googleapis.com/auth/adwords"
+)
 MAX_REQUEST_BODY_BYTES = 1_048_576
 CORRELATION_ID_HEADER = b"x-correlation-id"
 CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
@@ -56,6 +60,10 @@ SECURITY_RESPONSE_HEADERS = {
     b"referrer-policy": b"no-referrer",
     b"x-content-type-options": b"nosniff",
 }
+#: Only attached outside ``environment == "local"`` (docs/SECURITY.md "Girdi, cikti ve web
+#: guvenligi"): HSTS on a plain-HTTP local dev response is meaningless and would be actively
+#: wrong (browsers cache it per-host and there is no cert to fall back to).
+HSTS_HEADER = (b"strict-transport-security", b"max-age=63072000; includeSubDomains")
 
 
 def _problem_response(
@@ -89,7 +97,9 @@ class RequestBodyLimitMiddleware:
         self._app = app
         self._max_body_bytes = max_body_bytes
 
-    async def __call__(self, scope: dict[str, Any], receive: Callable[[], Awaitable[dict]], send: Callable) -> None:
+    async def __call__(
+        self, scope: dict[str, Any], receive: Callable[[], Awaitable[dict]], send: Callable
+    ) -> None:
         if scope["type"] != "http":
             await self._app(scope, receive, send)
             return
@@ -160,7 +170,9 @@ class CorrelationIdMiddleware:
     def __init__(self, app: Callable[..., Awaitable[None]]) -> None:
         self._app = app
 
-    async def __call__(self, scope: dict[str, Any], receive: Callable[[], Awaitable[dict]], send: Callable) -> None:
+    async def __call__(
+        self, scope: dict[str, Any], receive: Callable[[], Awaitable[dict]], send: Callable
+    ) -> None:
         if scope["type"] != "http":
             await self._app(scope, receive, send)
             return
@@ -195,10 +207,13 @@ class CorrelationIdMiddleware:
 class SecurityHeadersMiddleware:
     """Attach conservative browser security headers to every public HTTP response."""
 
-    def __init__(self, app: Callable[..., Awaitable[None]]) -> None:
+    def __init__(self, app: Callable[..., Awaitable[None]], *, hsts: bool = False) -> None:
         self._app = app
+        self._hsts = hsts
 
-    async def __call__(self, scope: dict[str, Any], receive: Callable[[], Awaitable[dict]], send: Callable) -> None:
+    async def __call__(
+        self, scope: dict[str, Any], receive: Callable[[], Awaitable[dict]], send: Callable
+    ) -> None:
         if scope["type"] != "http":
             await self._app(scope, receive, send)
             return
@@ -210,6 +225,8 @@ class SecurityHeadersMiddleware:
                 for key, value in SECURITY_RESPONSE_HEADERS.items():
                     if key not in existing:
                         headers.append((key, value))
+                if self._hsts and HSTS_HEADER[0] not in existing:
+                    headers.append(HSTS_HEADER)
                 message = {**message, "headers": headers}
             await send(message)
 
@@ -233,13 +250,22 @@ def create_app(
     or making real Google Ads calls.
     """
     settings = settings or Settings.load()
+    if settings.environment != "local" and not settings.public_base_url.startswith("https://"):
+        raise RuntimeError(
+            "PUBLIC_BASE_URL 'https://' ile baslamali (APP_ENVIRONMENT='local' disinda) -- "
+            "connector AS'in issuer/authorization_endpoint/token_endpoint ve protected-resource "
+            "metadata'si bu deger uzerinden kurulur; OAuth 2.1 ve MCP Authorization "
+            "spesifikasyonu tum AS uc noktalarinin HTTPS uzerinden sunulmasini zorunlu kilar "
+            "(bkz. docs/AUTH.md 'Saldiri kontrolleri')."
+        )
     conn = connect(settings.sqlite_db_path)
 
     if vault is None:
         if not settings.local_vault_key:
             raise RuntimeError(
                 "LOCAL_VAULT_KEY tanimli degil (bkz. .env.example) -- yerel/dev vault icin "
-                "zorunlu; uretimde SECURITY.md'nin secrets manager karari uygulanmalidir (hala TBD)."
+                "zorunlu; uretimde SECURITY.md'nin secrets manager karari uygulanmalidir "
+                "(hala TBD)."
             )
         vault = LocalEncryptedVault(conn, settings.local_vault_key)
 
@@ -259,7 +285,9 @@ def create_app(
         )
 
     http_client = httpx.Client(timeout=10.0)
-    mcp_server = build_mcp_server(settings=settings, conn=conn, vault=vault, reporting_client=reporting_client)
+    mcp_server = build_mcp_server(
+        settings=settings, conn=conn, vault=vault, reporting_client=reporting_client
+    )
     mcp_app = wrap_with_principal_auth(mcp_server, settings=settings, conn=conn)
 
     @asynccontextmanager
@@ -272,9 +300,29 @@ def create_app(
             conn.close()
 
     app = FastAPI(title="AddObserver connector", lifespan=lifespan)
+    # Added innermost-first: the LAST middleware added wraps every one before it, so
+    # SecurityHeadersMiddleware/CorrelationIdMiddleware end up outermost and therefore still
+    # attach their headers to responses that TrustedHost/CORS short-circuit (e.g. a Host
+    # mismatch 400 never reaches the route, but must still carry no-store/CSP/correlation-id).
     app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=MAX_REQUEST_BODY_BYTES)
-    app.add_middleware(SecurityHeadersMiddleware)
+    # CORS: closed by default (docs/SECURITY.md "CORS acik allowlist'tir"). No entry in
+    # ``cors_allowed_origins`` means no cross-origin browser access at all -- never "*", never
+    # allow_credentials, since our auth is bearer/cookie based and a wildcard+credentials
+    # combination would let any site read a signed-in user's responses.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.cors_allowed_origins),
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["authorization", "content-type", "x-correlation-id"],
+        expose_headers=["x-correlation-id"],
+    )
+    # Host header validation (docs/SECURITY.md): rejects requests for a Host this deployment
+    # was never configured to answer for. Derived from PUBLIC_BASE_URL/ALLOWED_HOSTS only --
+    # DEPLOYMENT.md's proxy topology ADR is still open, so no `X-Forwarded-Host` trust here.
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.allowed_hosts))
     app.add_middleware(CorrelationIdMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware, hsts=settings.environment != "local")
     app.state.auth_context = AuthContext(
         settings=settings,
         conn=conn,

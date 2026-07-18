@@ -7,3 +7,10 @@ node_modules/
 .DS_Store
 *.log
 .claude/settings.local.json
+backend/.data/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.pyright/
+*.egg-info/

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -65,7 +65,9 @@ class _RecordingSend:
 class PrincipalAuthMiddlewareTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.conn = connect(":memory:")
-        self.principal = PrincipalRepository(self.conn).get_or_create("https://accounts.google.com", "sub-1")
+        self.principal = PrincipalRepository(self.conn).get_or_create(
+            "https://accounts.google.com", "sub-1"
+        )
         self.tokens = TokenRepository(self.conn)
 
     def _middleware(self, downstream) -> PrincipalAuthMiddleware:
@@ -76,8 +78,10 @@ class PrincipalAuthMiddlewareTests(unittest.IsolatedAsyncioTestCase):
             protected_resource_metadata_url=METADATA_URL,
         )
 
-    def _save_token(self, raw_token: str, *, resource: str = EXPECTED_RESOURCE, expired: bool = False) -> None:
-        expires_at = datetime.now(timezone.utc) + (timedelta(minutes=-5) if expired else timedelta(hours=1))
+    def _save_token(
+        self, raw_token: str, *, resource: str = EXPECTED_RESOURCE, expired: bool = False
+    ) -> None:
+        expires_at = datetime.now(UTC) + (timedelta(minutes=-5) if expired else timedelta(hours=1))
         self.tokens.save_access(
             AccessToken(
                 token=raw_token,

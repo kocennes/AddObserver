@@ -150,7 +150,12 @@ class ExecuteWithRetryTests(unittest.TestCase):
         execute_with_retry(
             operation,
             classify=lambda exc: _rate_limit_error(retry_delay=9.0),
-            policy=RetryPolicy(max_attempts=3, max_elapsed_seconds=60, base_delay_seconds=0.1, max_delay_seconds=1.0),
+            policy=RetryPolicy(
+                max_attempts=3,
+                max_elapsed_seconds=60,
+                base_delay_seconds=0.1,
+                max_delay_seconds=1.0,
+            ),
             sleep=clock.sleep,
             monotonic=clock.monotonic,
             rng=random.Random(0),

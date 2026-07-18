@@ -1,5 +1,6 @@
 """Human-approval domain primitives."""
 
+from .application import ExecutionClaim, MutationAdapter, MutationOutcome, execute_reserved_mutation
 from .domain import (
     Approval,
     ApprovalError,
@@ -12,7 +13,6 @@ from .domain import (
     reserve_execution,
     submit_proposal,
 )
-from .application import ExecutionClaim, MutationAdapter, MutationOutcome, execute_reserved_mutation
 from .payload_schema import PROPOSAL_SCHEMA_VERSION, ProposalType, build_proposal_payload
 from .serialization import proposal_status_for_read, proposal_to_dict
 
