@@ -80,6 +80,7 @@ class Settings:
     google_ads_developer_token: str = field(repr=False)
     allowed_hosts: tuple[str, ...]
     cors_allowed_origins: tuple[str, ...]
+    database_url: str = field(default="", repr=False)
 
     @property
     def mcp_resource_uri(self) -> str:
@@ -107,4 +108,5 @@ class Settings:
             google_ads_developer_token=os.environ.get("GOOGLE_ADS_DEVELOPER_TOKEN", ""),
             allowed_hosts=allowed_hosts,
             cors_allowed_origins=cors_allowed_origins,
+            database_url=os.environ.get("DATABASE_URL", ""),
         )

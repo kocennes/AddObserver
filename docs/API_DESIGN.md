@@ -45,7 +45,9 @@ sözleşmesini belirlemek. Endpoint kataloğunun ayrıntısı `API_CONTRACTS.md`
 
 ### MCP tools
 
-- Read, proposal preparation ve execution ayrı tool'lardır. Model için raw GAQL/raw mutate tool'u yoktur.
+- Read, proposal preparation ve execution ayrı tool'lardır. Directory v1/Faz 1 yalnız read + local proposal
+  preparation içerir; execution tool'u Faz 8 Google Compliance kapısına kadar yoktur. Model için raw GAQL/raw
+  mutate tool'u yoktur.
 - Tool schema JSON Schema 2020-12, `additionalProperties: false`, açık min/max ve output schema taşır.
 - Kimlik/principal tool argümanı değildir. Tool annotations yetkilendirme veya insan onayı sayılmaz.
 - Execution tool yalnız proposal ID alır; backend onay, hash, freshness, ownership ve audit'i tekrar doğrular.
@@ -92,10 +94,12 @@ kullanılır:
 - HTTP framework (Python varsayımıyla aday FastAPI) ve OpenAPI breaking-change aracı.
 - UI için aynı-origin cookie session mı, ayrı BFF mi kullanılacağı.
 - Ayrı internal admin API ihtiyacı.
-- İlk desteklenecek mutate allowlist'i.
+- İlk desteklenecek live mutate execution allowlist'i Faz 8 Google Compliance/RMF kararına bağlıdır.
 
 ## Güncelleme geçmişi
 
+- 2026-07-18 — Faz 1.1 kapsam kararı kapatıldı: mevcut API/MCP yüzeyi Directory v1 için reporting + local
+  proposal hazırlama olarak kalır; live Google Ads execution/tool tasarımı Faz 8'e ertelendi.
 - 2026-07-18 — Faz 1.5: "Public MCP endpoint path/versioning" sorusu kapatıldı -- mevcut path-based
   `/api/v1/...` sürümleme korunur; yeni "Pagination sözleşmesi" bölümü opak, imzalı, principal/
   customer/status/expiry'e bağlı keyset cursor kararını ekliyor. `GET /api/v1/proposals` bu

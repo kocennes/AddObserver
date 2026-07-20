@@ -4,6 +4,19 @@ Bu dosya AddObserver'ı mevcut prototipten güvenli, herkese açık, ücretsiz v
 Directory'de yayınlanmış bir Google Ads connector'üne götüren ana yürütme listesidir. Her checkbox
 altındaki metin bağımsız bir Codex/Claude promptu olarak kullanılabilir.
 
+## Kalan kapsam notu — 2026-07-19
+
+- Genel ürün amacı baz alınarak proje yaklaşık `%35` tamamlanmış, kalan kapsam yaklaşık `%65` kabul
+  edilmiştir. Bu oran checkbox sayısından türetilmiş kesin bir ilerleme metriği değildir; production
+  veri katmanı, Google Ads reporting/write kapsamı, ürün yüzeyleri, operasyon, altyapı, hukuk/politika,
+  dış doğrulamalar, Directory submission ve launch ağırlıkları birlikte değerlendirilmiştir.
+- Aşağıdaki açık maddeler kalan `%65` için yürütme listesidir. Yeni bir iş yalnız kabul edilmiş bir
+  belge gereksiniminden, doğrulanmış dış koşuldan veya uygulama sırasında bulunan somut bir eksikten
+  doğarsa eklenir; varsayımsal özellik eklenmez.
+- `LEGAL.md` ve `GOOGLE_API_ACCESS.md` hâlen `Taslak` olduğu için bunlara bağlı production işleri
+  özellikle `BLOKE`/`... SONRASI` olarak açık bırakılmıştır. Hosting, işletmeci bilgisi, hukukçu,
+  Google Compliance, Google OAuth verification ve Anthropic reviewer kararları uydurulmaz.
+
 ## Görev takip kuralı
 
 - Göreve başlanmadıysa veya görev kısmen tamamlandıysa `- [ ]` olarak bırak.
@@ -172,13 +185,25 @@ Bir madde ancak aşağıdakilerin tamamı sağlandığında işaretlenir:
 
 # Faz 1 — ürün ve mimari kararlarını kapat
 
-- [ ] **1.1 Faz 1 ürün kapsamını kesinleştir**
+- [x] **1.1 Faz 1 ürün kapsamını kesinleştir**
 
   Prompt: `docs/PRODUCT.md`, `ARCHITECTURE.md`, `MCP.md`, `GOOGLE_API_ACCESS.md` ve
   `CONNECTOR_SUBMISSION.md` açık sorularını karşılaştır. Faz 1'in reporting + local proposal mı,
   yoksa gerçek Google Ads write içerip içermediğini karar seçenekleri, Google RMF etkisi, güvenlik
   riski ve submission etkisiyle ürün sahibine sun. Onay gelirse belgeleri tutarlı biçimde güncelle;
   onay gelmeden write kapsamını değiştirme.
+
+  Tamamlanma kanıtı: Kullanıcının "keep coding" talimatı ürün sahibi yönlendirmesi olarak kabul edildi ve
+  `GOOGLE_API_ACCESS.md`'nin hâlâ `Taslak`/Google Compliance bekliyor olması nedeniyle gerçek Google Ads
+  write/execution kapsamı açılmadı. Faz 1 kararı reporting + local proposal olarak netleştirildi:
+  `prepare_proposal` yalnız connector DB'sinde bekleyen onay kaydı oluşturur, Google Ads'e mutate çağrısı
+  yapan execution/apply tool'u Directory v1/Faz 1'e dahil değildir. `docs/PRODUCT.md`,
+  `docs/ARCHITECTURE.md`, `docs/MCP.md`, `docs/API_DESIGN.md`, `docs/API_CONTRACTS.md` ve
+  `docs/CONNECTOR_SUBMISSION.md` açık soruları/güncelleme geçmişi bu kararla tutarlı hale getirildi.
+  Faz 8 write/execution backlog'u Google Compliance/RMF sınıflandırması ve Anthropic reviewer UX'i
+  doğrulanana kadar bloke kalır. Doğrulama: `PYTHONUTF8=1 python tools/check_docs.py` (21 belge
+  doğrulandı), `PYTHONUTF8=1 python -m unittest discover -s backend/tests -v` (391 test, OK),
+  `git diff --check` (yalnız CRLF normalizasyon uyarıları).
 
 - [x] **1.2 Principal kimliği ve account recovery kararını kapat**
 
@@ -822,19 +847,54 @@ Bir madde ancak aşağıdakilerin tamamı sağlandığında işaretlenir:
 
 # Faz 4 — veri katmanını production mimarisine taşı
 
-- [ ] **4.1 PostgreSQL migration planı ve ADR'sini doğrula**
+- [x] **4.1 PostgreSQL migration planı ve ADR'sini doğrula**
 
   Prompt: Mevcut SQLite prototip şemasını `DATABASE.md` ve `DATA_MODEL.md` ile karşılaştır. PostgreSQL,
   SQLAlchemy 2.x, Alembic, connection pooling ve transaction sınırları için uygulanabilir migration
   planı hazırla. SQLite test hızını koruyan fakat production davranışını saklamayan test stratejisini
   belirle. Kabul edilmiş ADR olmadan kalıcı production migration'a başlama.
 
-- [ ] **4.2 SQLAlchemy modelleri ve Alembic başlangıç migration'ını uygula**
+  Tamamlanma kanıtı: Mevcut `backend/src/db/schema.py` SQLite tablo envanteri `docs/DATABASE.md` ve
+  `docs/DATA_MODEL.md` ile karşılaştırıldı. Çekirdek tabloların büyük kısmı eşleşiyor, fakat SQLite'ın
+  RLS/rol ayrımı/transaction-local principal context, PostgreSQL tipleri (`uuid`, `timestamptz`, `jsonb`),
+  production composite constraint derinliği ve outbox/locking davranışını kanıtlamadığı belirlendi.
+  `docs/decisions/0006-postgresql-migration-plan.md` kabul edildi: SQLAlchemy 2 metadata tek production
+  kaynak olacak, Alembic başlangıç migration'ı principal/client grant/account/credential/auth token/web
+  session/proposal/approval/execution/audit tablolarını kuracak; `analysis_run` ürün kararı, `vault_secret`
+  production KMS/secrets manager kararı, retention/purge ise legal/observability kararı gelene kadar
+  başlangıç migration'ına gömülmeyecek. SQLite hızlı unit/regression testleri korunacak ama production DB
+  davranışı sayılmayacak; RLS ve concurrency kanıtları 4.3/4.4 PostgreSQL entegrasyon testlerine bırakıldı.
+  `docs/DATABASE.md` ve `docs/DATA_MODEL.md` ADR-0006'ya çapraz referansla güncellendi.
+
+- [x] **4.2 SQLAlchemy modelleri ve Alembic başlangıç migration'ını uygula**
 
   Prompt: Kabul edilen DB kararından sonra principal, client grant, account, credential metadata,
   auth transaction/code/token, web login/session, proposal, approval, execution ve audit tablolarını
   accepted veri modeliyle oluştur. Composite ownership FK, unique/idempotency constraint, UTC zaman,
   JSON schema version ve rollback migration ekle. Secret değerini DB kolonuna koyma.
+
+  Tamamlanma kanıtı: `backend/pyproject.toml` runtime dependency listesine SQLAlchemy 2, Alembic ve
+  production PostgreSQL bağlantısı için psycopg eklendi.
+  `backend/src/db/sqlalchemy_schema.py`, ADR-0006 kapsamındaki production metadata'yı oluşturuyor:
+  `principal`, `ads_account`, `oauth_client_grant`, `oauth_credential`, connector OAuth
+  transaction/code/access/refresh token tabloları, `web_login_state`, `web_session`, `proposal`,
+  `approval`, `execution` ve `audit_event`. Üretim şeması PostgreSQL `uuid`, `timestamptz` ve `jsonb`
+  tiplerini kullanıyor; `approval`/`execution`, `proposal(id, principal_id)` composite FK'siyle
+  principal ownership'ü DB seviyesinde bağlar; `execution` idempotency unique constraint'i
+  `principal_id + proposal_id + idempotency_key` kapsamındadır. `analysis_run` ürün kararı, `vault_secret`
+  production KMS/secrets manager kararı gelene kadar dışarıda bırakıldı; secret değeri DB kolonuna
+  eklenmedi. `backend/alembic.ini`, `backend/alembic/env.py` ve
+  `backend/alembic/versions/20260718_0001_initial_postgresql_schema.py` başlangıç migration'ını ve
+  downgrade/drop sırasını ekledi; RLS policy'leri bilinçli olarak 4.3'e bırakıldı. Yeni
+  `backend/tests/test_sqlalchemy_schema.py` (6 test), Alembic head revision'ını, tablo envanterini,
+  principal-scoped kolon zorunluluğunu, composite ownership FK'lerini, idempotency constraint'ini ve
+  PostgreSQL DDL'de UUID/JSONB/timestamptz kullanımını doğruluyor. `README.md` ve `docs/TESTING.md`
+  Alembic offline SQL doğrulama komutuyla güncellendi. Doğrulama: `PYTHONUTF8=1 python -m unittest
+  discover -s backend/tests -v` (397 test, OK), `ruff format --check backend` (82 dosya temiz),
+  `ruff check backend` (temiz), `pyright backend/src` (0 hata), `bandit -c backend/pyproject.toml -r
+  backend/src` (0 bulgu), `PYTHONUTF8=1 python tools/check_docs.py` (21 belge doğrulandı),
+  `python -m alembic -c alembic.ini upgrade head --sql` (backend/ dizininden, PostgreSQL DDL üretildi),
+  `git diff --check` (yalnız CRLF normalizasyon uyarıları).
 
 - [ ] **4.3 PostgreSQL RLS izolasyonunu uygula**
 
@@ -843,12 +903,157 @@ Bir madde ancak aşağıdakilerin tamamı sağlandığında işaretlenir:
   context sızıntısını engelle. Uygulama filtrelerini koru. Cross-principal SELECT/INSERT/UPDATE/DELETE,
   pool reuse ve privileged-role negatif entegrasyon testleri yaz.
 
+  Kısmi ilerleme: `backend/alembic/versions/20260718_0002_enable_principal_rls.py`, ADR-0006'daki
+  principal-scoped tablolar için `ENABLE ROW LEVEL SECURITY`, `FORCE ROW LEVEL SECURITY` ve aynı
+  `app.current_principal_id` transaction-local setting'ine bağlı `USING`/`WITH CHECK` policy'lerini
+  ekledi. `backend/src/db/postgres_context.py`, principal UUID'sini doğrulayıp `set_config(..., true)`
+  ile transaction-local context atayan/temizleyen helper'ları ekledi. `backend/tests/test_sqlalchemy_schema.py`
+  RLS revision contract'ını ve helper davranışını kapsayacak şekilde genişledi.
+  `backend/src/db/postgres.py`, production `DATABASE_URL` değerinin PostgreSQL dialect'i olmasını zorlayan
+  engine factory'yi ve her transaction'da RLS principal context'ini set/cleanup eden
+  `principal_transaction` helper'ını ekledi; `backend/tests/test_postgres_runtime.py` bu helper'ın
+  DSN redaction, PostgreSQL-only URL, commit ve rollback sırasını canlı DB gerektirmeden kanıtlıyor.
+  `backend/src/db/postgres_repository.py`, ilk production repository dilimi olarak `principal`,
+  `oauth_client_grant`, `ads_account`, `oauth_credential`, `proposal`, `approval`, `execution` ve `audit_event`
+  adaptörlerini SQLAlchemy Core'a taşıdı; `backend/tests/test_postgres_repository.py` idempotent
+  principal/account linking, client consent scoping/re-consent, cross-principal read yokluğu,
+  active/history ayrımı, relink reactivation, credential active/revoke ownership, proposal
+  payload/hash guard'ları, pending proposal pagination/filtering, approval/audit principal scoping,
+  execution idempotency/snapshot/result ownership ve repository'nin kendi transaction'ını commit etmediğini
+  doğruluyor. Bu artış ayrıca production
+  `approval.decision` constraint'ini domain enum değerleriyle (`approve`/`reject`) hizaladı ve
+  `backend/tests/test_sqlalchemy_schema.py` içine regression ekledi.
+  `backend/tests/test_postgres_rls_integration.py`, `ADDOBSERVER_POSTGRES_TEST_DSN` verildiğinde
+  disposable PostgreSQL schema'sı üzerinde cross-principal SELECT/INSERT/UPDATE/DELETE, pool reuse ve
+  `BYPASSRLS`/superuser test rolü negatif vakalarını çalıştırır. Madde hâlâ açık: bu ortamda canlı
+  PostgreSQL DSN'i olmadığı için entegrasyon testi skip etti; auth/token repository'leri ve ASGI composition
+  root henüz production SQLAlchemy helper'a bağlanmadı. Production şema denetiminde domain'in URL-safe
+  opaque değer ürettiği connector refresh-token `family_id` alanının yanlışlıkla UUID tanımlandığı bulundu;
+  metadata ve başlangıç migration'ı `TEXT` ile hizalandı ve şema regresyon testi eklendi.
+  Connector OAuth geçişinin ilk parçasında `PostgresAuthorizationTransactionRepository` ve
+  `PostgresAuthorizationCodeRepository` eklendi: repository'ler commit etmez, authorization code'u
+  yalnız SHA-256 hash olarak saklar ve `consumed_at IS NULL` koşullu update ile tek kullanımlı claim'i
+  atomik uygular. Aynı denetimde `authorization_transaction.id` ve child FK'sinin domain'in opaque
+  kimliğiyle çelişen UUID tipi `TEXT` yapıldı; DB status constraint'i domain enum'uyla
+  `pending/consented/completed` olarak hizalandı. Regresyon testleri opaque ID round-trip, durum geçişi,
+  hash-only saklama, replay tespiti ve bilinmeyen kodun fail-closed davranışını kapsıyor.
+  `PostgresTokenRepository` de access/refresh token'ları yalnız hash olarak saklayacak, koşullu
+  `status = active` update ile atomik rotate edecek, replay'de tüm family'yi ve disconnect'te yalnız hedef
+  principal'ın tüm access/refresh token'larını revoke edecek şekilde eklendi. SQLite'ın timezone bilgisini
+  düşüren test dönüşleri repository sınırında UTC-aware normalize edildi.
+  `PostgresWebLoginStateRepository` ve `PostgresWebSessionRepository` login state/session/CSRF değerlerini
+  yalnız hash saklama, atomik state claim, unknown-safe lookup, tekil revoke ve principal-wide revoke
+  davranışlarıyla eklendi. Wiring denetiminde `/token`'ın code hash'inden principal'ı öğrenmeden RLS context
+  kuramayacağı, `authorization_code` policy'sinin ise context olmadan satırı göstermediği bootstrap problemi
+  bulundu. `20260719_0003_authorization_code_bootstrap_rls` yalnız SELECT için, transaction-local SHA-256
+  code hash'iyle tam eşleşen tek satırı görünür yapan policy ekledi; principal çözüldüğünde hash context
+  temizlenip normal principal context kuruluyor. `authorization_code_transaction` bu sırayı atomik ve
+  fail-closed uygular; `BYPASSRLS`, tablo sahipliği veya `SECURITY DEFINER` verilmez. Migration zinciri,
+  exact-hash policy sözleşmesi, context cleanup, unknown-code rollback ve opsiyonel canlı PostgreSQL bootstrap
+  testi eklendi. ASGI taramasında auth/API/MCP yollarında yaklaşık 30 doğrudan SQLite repository kurulumu
+  bulundu; kısmi geçiş RLS transaction sınırını parçalayacağından tek tek production'a açılmadı. Bunun yerine
+  `APP_ENVIRONMENT=production|prod`, tüm yollar PostgreSQL request transaction provider'a taşınana kadar
+  SQLite fallback'e düşmeden fail-closed başlangıç hatası verir; DSN/secret hata metnine girmez. Tam ASGI
+  wiring için `PostgresUnitOfWorkFactory`/`PostgresRequestUnitOfWork` temeli eklendi: bir isteğin tüm
+  repository'leri aynı connection/transaction'ı paylaşır, principal sonradan bağlanabilir veya exact-hash
+  authorization-code bootstrap ile türetilebilir, başarı tek commit/context cleanup ve hata rollback üretir.
+  Lifecycle/connection-sharing/fail-closed testleri eklendi. Route/MCP çağrı noktalarının provider'a taşınması
+  sırasında refresh-token grant ve bearer access-token doğrulamasının da principal'ı ancak token satırından
+  öğrenebildiği ikinci bootstrap boşluğu bulundu. `20260719_0004_token_bootstrap_rls`, access/refresh tablolarına
+  yalnız exact SHA-256 token hash'i için SELECT policy ekledi; unit-of-work ayrı access/refresh bootstrap
+  metotlarıyla principal context kurup hash context'i temizler. Migration ve opsiyonel canlı PostgreSQL testleri
+  genişletildi. İlk gerçek ASGI dilimi olarak `/token`, production factory verildiğinde code bootstrap/claim/
+  token insert ile refresh bootstrap/rotation'ı tek unit-of-work içinde çalıştıracak şekilde bağlandı; iki grant
+  için route contract testleri ve mevcut SQLite uçtan uca OAuth regresyonları geçti. Kalan auth/API/MCP çağrı
+  noktalarının provider'a taşınması ve canlı PostgreSQL kanıtı tamamlanana kadar madde açıktır.
+  `create_app`, unit-of-work factory'sini composition root'tan `AuthContext` içine taşıyacak biçimde
+  genişletildi; gerçek ASGI `/token` isteğinin authorization-code bootstrap, atomik claim ve token
+  insert'lerini aynı injected work üzerinden yürüttüğü route testiyle doğrulandı.
+  Bearer-korumalı `GET /api/v1/accounts`, `GET /api/v1/proposals` ve
+  `GET /api/v1/proposals/{proposal_id}` yolları da access-token exact-hash bootstrap, token doğrulama ve
+  principal-scoped sorguyu aynı request unit-of-work içinde çalıştıracak şekilde taşındı; gerçek ASGI
+  accounts testi transaction sınırını doğruluyor. Approval/browser ve MCP yolları henüz taşınmadığı için
+  production kapısı ve madde açık kalır.
+  MCP bearer middleware'i de PostgreSQL access-token bootstrap/doğrulama yoluna bağlandı. Bu kısa auth
+  transaction'ı downstream tool çalışmadan önce kapanır; böylece ADR-0006'nın Google Ads ağ çağrısını açık
+  DB transaction içinde çalıştırmama kuralı korunur. MCP tool repository'lerinin ağ çağrısından ayrılmış
+  transaction'lara taşınması ve browser/approval yolları hâlâ açıktır.
+  Browser approval session'ı için `20260719_0005_web_session_bootstrap_rls` eklendi: yalnız exact SHA-256
+  cookie hash'ine uyan `web_session` satırı SELECT ile görünür, ardından principal context kurulur.
+  `/approvals`, proposal decision ve `/logout` session bootstrap ile DB işlemlerini aynı kısa unit-of-work
+  içinde yürütür. Canlı PostgreSQL fixture'ında policy'lerin tablolar yaratılmadan önce kurulması hatası da
+  düzeltildi. Google/secrets-manager etkileşimli login callback ve disconnect akışları ayrıştırılmadan
+  taşınmayacağı için madde açık kalır.
+  Login-only `/login` state creation PostgreSQL repository'ye taşındı. Callback state claim transaction'ı
+  Google code exchange'inden önce kapanır; doğrulanmış Google subject sonrasında ikinci kısa transaction
+  principal'ı bulur, RLS context'i bağlar ve browser session'ı oluşturur. Test, dış Google exchange'in iki
+  DB transaction arasında gerçekleştiğini kanıtlar. Disconnect ve MCP tool repository işlemleri açıktır.
+  MCP'nin yalnız connector DB'sine dokunan `list_accessible_accounts`, `prepare_proposal`, `get_proposal`
+  ve `list_proposals` yolları principal-bound kısa PostgreSQL transaction'lara taşındı. Google reporting
+  credential metadata çözümlemesi de kısa principal transaction'ına taşındı; transaction kapandıktan sonra
+  vault okunur ve Google Ads çağrılır. AUTH-class provider hatasında credential pasifleştirme ayrı kısa
+  transaction'da yapılır. Böylece reporting boyunca açık DB transaction tutulmaz.
+
+  `/authorize` transaction oluşturma ile `/authorize/consent` transaction okuma/durum ilerletme yolları da
+  kısa PostgreSQL unit-of-work transaction'larına taşındı; lifecycle ve hata rollback contract testleri
+  eklendi. Vault yazan connector Google callback ve durable revoke gerektiren disconnect, 4.4'teki kalıcı
+  state/outbox kararı tamamlanmadan production PostgreSQL yoluna açılmaz.
+  Authorization consent okuma+durum ilerletme tek unit-of-work içine alındı; PostgreSQL repository
+  `pending → consented → completed` geçişlerini predecessor koşullu compare-and-set ile uygular. Stale
+  contract testi ve iki-connection canlı PostgreSQL consent yarışı testi eklendi; canlı kanıt DSN olmadığı
+  için skip kalır.
+
 - [ ] **4.4 Repository transaction ve concurrency güvenliğini tamamla**
 
   Prompt: Authorization code claim, refresh rotation, proposal decision, execution reservation,
   idempotency ve audit atomicity yollarını concurrent transaction testleriyle doğrula. Lost update,
   double approval, duplicate execution ve cross-principal collision'ı DB constraint/locking ile
   fail-closed engelle. SQLite'a özel davranışı production varsayımı yapma.
+
+  Ek zorunlu iş: disconnect için durable vault-revocation state/outbox kararı ve concurrency testi ekle.
+  Mevcut sırada DB credential metadata revoke edildikten sonra vault silme başarısız olursa sonraki retry
+  vault referansını bulamaz; vault-first yaklaşımı ise eşzamanlı relink sırasında yanlış credential'ı revoke
+  edebilir. Kalıcı state-machine olmadan production PostgreSQL wiring yapılmaz.
+
+  ADR-0007 kabul edildi ve `20260719_0006_credential_revocation_outbox` migration'ı eklendi.
+  `credential_revocation_job`, principal/credential composite ownership, FORCE RLS, credential başına tek iş,
+  attempt/next-attempt ve güvenli error-code alanlarını taşır; secret değeri DB'ye girmez.
+  `PostgresCredentialRevocationRepository`, credential metadata revoke + outbox enqueue işlemini aynı
+  transaction'da ve credential kimliği üzerinde idempotent uygular. Principal-scoped due-job claim,
+  `FOR UPDATE SKIP LOCKED`, attempt artırımı ve `next_attempt_at` lease'iyle eşzamanlı worker'ları ayırır;
+  retry yalnız kısa/güvenli error code kabul eder, completion idempotenttir. SQLite repository contract
+  testleri ownership, duplicate enqueue, lease, retry ve completion davranışını doğrular. Gerçek
+  `test_postgres_rls_integration.py` iki gerçek pooled connection ve thread barrier ile aynı revocation
+  job'ını yarıştırır; yalnız tek claim kazananı, tek attempt artışı ve ileri taşınan lease'i doğrular.
+  Bu makinede DSN yok ve Docker daemon çalışmıyor; dolayısıyla test hazır olsa da canlı kanıt skip kalır.
+  `auth/revocation_worker.py`, claim transaction'ını
+  vault çağrısından önce kapatır; başarı completion'ını veya provider metnini sızdırmayan
+  `VAULT_UNAVAILABLE` retry sonucunu ikinci kısa transaction'da kalıcılaştırır. Başarı/hata/no-work
+  contract testleri transaction sırasını kanıtlar. Retry/completion exact claimed-attempt generation'ını
+  compare-and-set koşulu yapar; lease expiry sonrası yeniden claim edilen işi stale worker'ın ezemediği
+  repository regresyonuyla doğrulanır. Scheduler/deployment tetikleyicisi Faz 10'a bağlı kalır.
+  Production
+  `POST /disconnect` artık exact session-hash bootstrap sonrası connector token, credential revoke+outbox,
+  account, tüm web session ve audit yazılarını tek principal-bound unit-of-work içinde commit eder; route
+  vault'a dokunmaz. ASGI contract testi atomik repository kapsamını, correlation/audit sonucunu ve vault
+  çağrısı olmadığını doğrular.
+
+  Kısmi ilerleme: approval state transition artık yalnız `pending_approval` satırını koşullu update eder;
+  ikinci/eşzamanlı karar proposal+approval+audit yazamaz. Execution reservation, yarışa açık
+  SELECT→INSERT yerine PostgreSQL/SQLite conflict-safe INSERT kullanır; aynı idempotency key eşzamanlı
+  geldiğinde unique violation/500 yerine kazanan satırı okuyup payload eşitliğini doğrular. SQLite contract
+  testleri geçti; gerçek iki-connection PostgreSQL yarış testleri DSN ile çalıştırılmak üzere hazırdır.
+  `test_postgres_rls_integration.py` gerçek iki ayrı pooled connection ve thread barrier ile duplicate
+  execution reservation yarışını çalıştıracak şekilde genişletildi; tek satır, tek `created=True` kazananı
+  ve her iki çağrının aynı execution ID'ye çözülmesini doğrular. Bu makinede Docker CLI bulunmasına rağmen
+  daemon çalışmıyor ve `ADDOBSERVER_POSTGRES_TEST_DSN` tanımlı değil; test bu nedenle henüz canlı kanıt
+  üretmeden skip kalır. Aynı canlı suite authorization-code claim için tek tüketici, refresh rotation replay
+  için tek rotation kazananı + tüm ailenin revoke edilmesi ve çift approval kararı için tek approval/audit
+  yazılması yarışlarını da iki ayrı pooled connection ile doğrular.
+  Refresh replay yolunda kritik rollback kusuru düzeltildi: repository aileyi revoke edip `AuthError`
+  yükseltiyor, route hatayı unit-of-work dışına kaçırdığı için güvenlik revoke'u rollback oluyordu. Route
+  artık beklenen replay hatasını transaction içinde yakalar, family revoke'u commit eder ve sonra güvenli
+  OAuth `invalid_grant` cevabı döner; beklenmeyen hatalar rollback olmaya devam eder.
 
 - [ ] **4.5 Veri retention ve purge altyapısını hazırla — HUKUK KARARINDAN SONRA**
 
@@ -907,15 +1112,31 @@ Bir madde ancak aşağıdakilerin tamamı sağlandığında işaretlenir:
   ekle fakat secret/payload sızdırma. Retryable olmayan hatayı tekrar deneme; server retry delay'i
   alt sınır olarak kullan.
 
+- [ ] **5.7 Opt-in Google Ads contract test ortamını kur — TEST HESABI/DIŞ ERİŞİM SONRASI**
+
+  Prompt: `TESTING.md` açık sorusunu kapat; yalnız ayrılmış ve gerçek müşteri verisi içermeyen bir Google
+  Ads test hesabında çalışan opt-in contract test suite'i, gerekli environment/secret sözleşmesi, güvenli
+  skip davranışı, çalışma sıklığı ve veri reset prosedürünü tanımla. Normal unit/CI koşusunda canlı çağrı
+  yapma. Test hesabı ve developer token sağlanmadan sahte başarı kanıtı üretme. Dayanak:
+  `TESTING.md`, `API_CONTRACTS.md`, `SECURITY.md`, `GOOGLE_API_ACCESS.md`.
+
 ---
 
 # Faz 6 — MCP ve HTTP ürün yüzeylerini tamamla
 
-- [ ] **6.1 MCP tool envanterini sözleşmeyle doğrula**
+- [x] **6.1 MCP tool envanterini sözleşmeyle doğrula**
 
   Prompt: Tüm tool adları, title, açıklama, input/output schema, `additionalProperties: false`, 64 karakter
   sınırı, readOnly/destructive annotation ve error davranışını `MCP.md` ve submission kriterleriyle
   contract test et. Read ve write'ı aynı tool'da birleştirme. Principal ID'yi tool argümanı yapma.
+
+  Tamamlandı: Gerçek Streamable HTTP MCP `tools/list` contract testi yedi tool'un exact envanterini,
+  ad/title/description alanlarını, 64 karakter sınırını, principal argümanı yokluğunu, kapalı input şemasını,
+  read-only/local-write ve destructive/idempotent/open-world annotation ayrımını doğrular. Tüm tool'lar
+  structured output'a geçirildi; account, üç reporting satırı ve sürümlü proposal payload/list çıktıları
+  explicit allowlist şemalara bağlandı. Test iç içe her object output şemasında
+  `additionalProperties: false` zorunluluğunu recursive doğrular. Yetkisiz, cross-principal, validation,
+  provider/auth hata ve secret-free davranışları mevcut MCP protocol/regresyon testleriyle birlikte geçti.
 
 - [ ] **6.2 Reporting tool sonuçlarını yapılandırılmış ve bounded yap**
 
@@ -957,6 +1178,29 @@ Bir madde ancak aşağıdakilerin tamamı sağlandığında işaretlenir:
   engelle. 429 + Retry-After/problem response ve MCP tool hata davranışını test et. Kesin sayısal limitleri
   trafik/Google kotası kararı olmadan production sabiti yapma; güvenli config kullan.
 
+- [ ] **6.8 Public HTTP API ve internal admin yüzeyi kararını kapat**
+
+  Prompt: MCP dışındaki ayrı user-facing HTTP API'nin ve internal admin API'nin gerçekten gerekli olup
+  olmadığını `API_CONTRACTS.md`/`API_DESIGN.md` açık sorularına göre ADR veya kabul edilmiş belge
+  değişikliğiyle kararlaştır. Gerekmiyorsa yüzeyi açıkça kapsam dışı bırak; gerekiyorsa auth, role,
+  versioning, pagination, RFC 9457 hata, CORS/CSRF ve OpenAPI sözleşmesini önce kabul ettir. Karar olmadan
+  yeni endpoint ekleme. Dayanak: `API_CONTRACTS.md`, `API_DESIGN.md`, `PRODUCT.md`, `SECURITY.md`.
+
+- [ ] **6.9 OpenAPI uyumluluk ve breaking-change kapısını kur — HTTP YÜZEYİ KARARI SONRASI**
+
+  Prompt: Kabul edilen public HTTP yüzeyi için framework tarafından üretilen OpenAPI belgesini kararlı
+  artifact olarak doğrula; schema snapshot/diff aracını seç, additive ile breaking değişiklikleri ayır ve
+  CI kapısı ekle. Auth callback/HTML/MCP transport'u yanlışlıkla public JSON API sözleşmesine katma.
+  Dayanak: `API_DESIGN.md`, `API_CONTRACTS.md`, `TESTING.md`.
+
+- [ ] **6.10 Retry, timeout ve partial-failure bütçelerini kabul ettir**
+
+  Prompt: Google Ads, Anthropic/model çağrısı, DB ve dış HTTP için retry edilebilir hata matrisi; attempt
+  sayısı, toplam süre, backoff/jitter, UI bekleme eşiği ve idempotency koşullarını ölçülebilir config olarak
+  belirle. Execution reconciliation aralığı/manual review SLA'sını ve Google Ads partial failure'ın gerekli
+  olup olmadığını kabul edilmiş belgeye geçir. Mutate sonucunu belirsizken kör retry yapma. Dayanak:
+  `ERROR_HANDLING.md`, `API_CONTRACTS.md`, `MCP.md`, `OPERATIONS.md`.
+
 ---
 
 # Faz 7 — insan onayı ve approval UI
@@ -993,6 +1237,14 @@ Bir madde ancak aşağıdakilerin tamamı sağlandığında işaretlenir:
   Prompt: Bekleyen proposal bildirimine ihtiyaç doğrulanırsa önce `docs/NOTIFICATIONS.md` oluştur;
   kanal, consent, hassas veri, rate limit, retry, unsubscribe ve teslim audit kararlarını kabul ettir.
   Belge kabul edilmeden email/Slack/webhook entegrasyonu ekleme. Ücretsiz ürün kuralını koru.
+
+- [ ] **7.6 UI teslim mimarisi ve E2E/a11y araçlarını kapat**
+
+  Prompt: Approval UI'nin aynı-origin secure cookie modeliyle mi yoksa ayrı bir BFF ile mi sunulacağını
+  mevcut `AUTH.md` kararıyla tutarlı şekilde belgeye bağla. Browser E2E ve otomatik accessibility aracını
+  seç; login, CSRF, approve/reject, expiry, disconnect, 320px reflow ve klavye akışlarını staging-benzeri
+  testlerde çalıştır. Dashboard veya MCP Apps kapsamını yeniden açma. Dayanak: `API_DESIGN.md`,
+  `DESIGN.md`, `AUTH.md`, `TESTING.md`, `decisions/0002-product-surface.md`.
 
 ---
 
@@ -1088,6 +1340,13 @@ Bir madde ancak aşağıdakilerin tamamı sağlandığında işaretlenir:
   evidence, communication, recovery ve postmortem adımlarını zamanla. Gerçek secret kullanma. Bulgularla
   `OPERATIONS.md` runbook'larını güncelle.
 
+- [ ] **9.7 Operasyonel sahiplik, destek ve incident SLA'larını kabul ettir**
+
+  Prompt: On-call sahibi, support sahibi/kanalı, security contact, incident severity sınıfları, ilk yanıt
+  ve kullanıcı bildirim hedefleri, escalation zinciri, bakım iletişimi ve status page ihtiyacını gerçek
+  işletmeci kapasitesiyle belirle. Sahibi olmayan 7/24 taahhüt yazma. Runbook ve alert routing'i bu
+  kararlara bağla. Dayanak: `OPERATIONS.md`, `OBSERVABILITY.md`, `PRODUCT.md`, `LEGAL.md`.
+
 ---
 
 # Faz 10 — build, CI/CD ve production altyapısı
@@ -1141,6 +1400,14 @@ Bir madde ancak aşağıdakilerin tamamı sağlandığında işaretlenir:
   Prompt: Repo visibility, team roles, branch protection, required review/check sayısı, merge yöntemi,
   push protection, Dependabot/update policy ve CODEOWNERS kararlarını kullanıcıyla netleştir. GitHub
   ayarlarını değiştirmeden önce açık onay al. `REPOSITORY.md` ile gerçek remote ayarını eşleştir.
+
+- [ ] **10.9 Dokümantasyon yönetişimi ve CI kapısını tamamla**
+
+  Prompt: Belge sahiplerini, değişiklik inceleme SLA'larını ve periyodik review sorumlularını belirle.
+  `tools/check_docs.py` kalite kapısını status/date/internal-link/matrix kurallarının yanında seçilen CI
+  ortamında zorunlu çalıştır; kırık external link kontrolünün güvenilir ve bounded yöntemini kararlaştır.
+  Taslak belgenin production yetkisi vermediğini otomatik kontrolde koru. Dayanak:
+  `DOCUMENTATION.md`, `TESTING.md`, `REPOSITORY.md`.
 
 ---
 
@@ -1200,6 +1467,21 @@ Bir madde ancak aşağıdakilerin tamamı sağlandığında işaretlenir:
   endpoint/tool/UI/test kanıtlarıyla tek tek eşleştir. Uygulanmayan zorunlu satır varken Standard Access
   hazır deme. “Not applicable” satırlarını yazılı Google dayanağı olmadan kapatma.
 
+- [ ] **11.10 Veri ihlali bildirim ve kullanıcı iletişimi sürecini hukukçuya onaylat — BLOKE**
+
+  Prompt: İhlal tespiti, delil koruma, kapsam belirleme, regulator/Google/Anthropic/kullanıcı bildirim
+  sahipleri, ülkeye göre süreler, mesaj onayı ve kayıt saklama akışını hukukçu kararıyla netleştir.
+  Varsayımsal yasal süre yazma; kabul edilen süreçle `SECURITY.md` ve `OPERATIONS.md` runbook'larını
+  eşleştirip masaüstü tatbikat yap. Dayanak: `LEGAL.md`, `SECURITY.md`, `OPERATIONS.md`.
+
+- [ ] **11.11 Controller/processor rolü ve self-service sözleşme kabulünü kapat — BLOKE**
+
+  Prompt: Google Ads verisi, connector telemetry'si ve support verisi için işletmecinin controller/
+  processor rolünü hukukçuya belirlet; gerekiyorsa DPA ve veri işleme talimatlarını hazırla. Terms/Privacy
+  sürümünü, kabul timestamp'ini, yeniden kabul koşulunu ve kanıt kaydını tasarla. Hukuk kararı olmadan
+  checkbox/consent metni veya production kabul kaydı ekleme. Dayanak: `LEGAL.md`, `DATA_MODEL.md`,
+  `PRIVACY_POLICY.md`, `TERMS.md`.
+
 ---
 
 # Faz 12 — Anthropic Connector Directory hazırlığı
@@ -1247,6 +1529,28 @@ Bir madde ancak aşağıdakilerin tamamı sağlandığında işaretlenir:
   Gönderilen cevapların ve tarihlerin kaydını tut; secret/test credential kopyalama. Reviewer sorularını
   issue/checklist olarak takip et ve gerekli değişikliklerde normal kod+test+belge kapısını uygula.
 
+- [ ] **12.8 Public ürün kimliği, marka, domain ve destek bilgilerini kesinleştir — DIŞ KARAR**
+
+  Prompt: Public ürün adı, doğrulanmış domain, homepage, operator adı ve support/privacy/security contact
+  adreslerini ürün sahibi ve hukuk kararıyla kesinleştir. Google/Anthropic marka politikalarına uygunluğu
+  doğrula; repo package adı ile public marka farklıysa mapping'i belgele. Placeholder veya sahip olunmayan
+  domain yayınlama. Dayanak: `PRODUCT.md`, `CONNECTOR_SUBMISSION.md`, `GOOGLE_API_ACCESS.md`, `LEGAL.md`.
+
+- [ ] **12.9 Claude istemci OAuth uyumluluk matrisini tamamla**
+
+  Prompt: Claude.ai, Claude Desktop ve desteklenecekse Claude Code için CIMD/DCR davranışı, redirect URI,
+  hosted callback veya loopback, refresh-token lifetime/rotation grace ve disconnect/re-link akışlarını
+  gerçek istemci contract testleriyle doğrula. Authlib authorization-server yaklaşımının desteklenen
+  client metadata akışına yeterli olup olmadığını kanıtla; değilse ADR aç. Dayanak: `AUTH.md`,
+  `CONNECTOR_SUBMISSION.md`, `MCP.md`, `SECURITY.md`.
+
+- [ ] **12.10 Reviewer credential teslim ve rotasyon prosedürünü doğrula**
+
+  Prompt: Test principal/account credential'larının hangi güvenli Anthropic kanalından, kim tarafından,
+  hangi süreyle verileceğini; submission öncesi reset, reviewer erişimi sırasında izleme ve inceleme sonrası
+  revoke/rotate adımlarını yazılı prosedür ve tatbikatla doğrula. Credential'ı repo, issue, log veya demo
+  materyaline koyma. Dayanak: `CONNECTOR_SUBMISSION.md`, `SECURITY.md`, `OPERATIONS.md`.
+
 ---
 
 # Faz 13 — production launch
@@ -1280,6 +1584,14 @@ Bir madde ancak aşağıdakilerin tamamı sağlandığında işaretlenir:
   Prompt: İlk kullanıcı sayısını/quota bütçesini sınırlı tut, onboarding ve support kanalını izle. Auth,
   quota, latency, error, approval age, disconnect ve policy metriklerini gözle. Unauthorized mutate/audit
   failure durumunda write kill switch'i çalıştır. Kullanıcı verisini debug amacıyla ham loglama.
+
+- [ ] **13.6 DAST ve ileri güvenlik test kapısını çalıştır**
+
+  Prompt: Public staging yüzeyinde authenticated/unauthenticated DAST kapsamını, destructive endpoint
+  güvenliğini ve test verisi sınırını belirle; uygun araçla OAuth redirect, SSRF, CSRF, CORS, injection,
+  session ve rate-limit kontrollerini çalıştır. Mutation testing'in kritik auth/approval/execution
+  modüllerine sağlayacağı değeri ölçüp uygulanacak kapsamı belgeye bağla. Production'a saldırı testi yapma.
+  Dayanak: `TESTING.md`, `SECURITY.md`, `OPERATIONS.md`.
 
 ---
 

@@ -36,9 +36,10 @@ mantıksal varlıklarını ve yaşam döngüsünü tanımlamak.
 | `oauth_client_grant` | `principal_id`, `client_id`, `scopes`, `status` | Connector consent; Google token değildir |
 | `ads_account` | `principal_id`, `customer_id`, `login_customer_id`, `status` | `(principal_id, customer_id)` benzersiz |
 | `oauth_credential` | `principal_id`, `vault_ref`, `status`, `key_version` | Google secret değeri yok |
+| `credential_revocation_job` | `principal_id`, `credential_id`, `vault_ref`, `status`, `attempts`, `next_attempt_at` | Credential başına tek durable vault revoke işi; secret değeri yok |
 | `analysis_run` | `principal_id`, `customer_id`, `window`, `input_snapshot_hash`, `status` | Varsayılan kısa ömürlü |
 | `proposal` | `principal_id`, `customer_id`, `type`, `payload`, `proposal_hash`, `risk`, `status`, `expires_at` | Allowlist şema |
-| `approval` | `proposal_id`, `approver_id`, `decision`, `proposal_hash`, `decided_at` | Karar değiştirilemez |
+| `approval` | `proposal_id`, `approver_id`, `decision`, `proposal_hash`, `decided_at` | Karar değiştirilemez; `decision` domain değerleri `approve`/`reject` |
 | `execution` | `proposal_id`, `idempotency_key`, `before`, `after`, `google_request_id`, `status` | Onay hash'i eşleşir |
 | `audit_event` | `event_id`, `occurred_at`, `actor`, `principal_id`, `customer_id`, `event_type`, `proposal_id`/`approval_id`/`execution_id`, `outcome`, `reason_code`, `correlation_id`, `google_request_id` | Append-only |
 | `web_login_state` | `state_hash`, `status`, `expires_at` | Tek kullanımlık; `/approvals` girişi için, Google credential'dan bağımsız |
@@ -72,15 +73,23 @@ mantıksal varlıklarını ve yaşam döngüsünü tanımlamak.
 - **Audit:** restricted; yasal/iş retention kararı `TBD`, bütünlük korumalı.
 - **Uygulama logu:** hassas içerik redacted; operasyon ihtiyacı kadar (`TBD`).
 
-Şema/migration uygulamasından önce DB motoru, RLS yaklaşımı ve retention kararları ADR ile kabul edilir.
+Şema/migration uygulamasından önce DB motoru ve RLS yaklaşımı ADR ile kabul edilir. DB motoru/ORM seçimi
+`docs/decisions/0001-backend-stack.md`, SQLite prototipten PostgreSQL/Alembic başlangıç migration'ına geçiş
+planı `docs/decisions/0006-postgresql-migration-plan.md` ile kabul edilmiştir. Retention kararları ayrı
+legal/observability kapılarında kalır ve başlangıç migration'ına purge politikası olarak gömülmez.
 
 ## Açık sorular
 
 - Kesin retention süreleri ve audit WORM hedefi `LEGAL.md`/`OBSERVABILITY.md` kararına bağlıdır.
-- Principal merge/account recovery davranışı.
 
 ## Güncelleme geçmişi
 
+- 2026-07-19 — ADR-0007 uyarınca principal-scoped `credential_revocation_job` outbox varlığı eklendi.
+  Credential sahipliği composite FK, tek iş unique constraint ve FORCE RLS ile korunur.
+
+- 2026-07-18 — ADR-0006 ile PostgreSQL başlangıç migration kapsamı netleşti: `analysis_run` ürün kararı,
+  `vault_secret` production KMS/secrets manager kararı, retention/purge ise legal/observability kararı
+  gelene kadar production başlangıç şemasına gömülmez.
 - 2026-07-18 — Proposal payload'ında `rationale` (uzunluk + kontrol karakteri), `current_status`
   (Google Ads `CampaignStatus` allowlist'i) ve `campaign_id` (19 hane üst sınırı) için sınır
   değer doğrulaması eklendi; önceden bu alanlar sınırsız serbest metindi.
@@ -89,6 +98,8 @@ mantıksal varlıklarını ve yaşam döngüsünü tanımlamak.
   token/kod hash-at-rest deseniyle aynıdır.
 - 2026-07-18 — `web_session` CSRF alanı hash-at-rest sözleşmesine göre `csrf_token_hash`
   olarak netleştirildi (docs/AUTH.md, docs/SECURITY.md).
+- 2026-07-18 — PostgreSQL başlangıç migration'ındaki `approval.decision` constraint'i domain
+  enum değerleriyle (`approve`/`reject`) eşitlendi; adapter ve şema regression testi eklendi.
 - 2026-07-17 — `/approvals` insan onay yüzeyi için `web_login_state`/`web_session` varlıkları
   eklendi (docs/AUTH.md, docs/ARCHITECTURE.md).
 - 2026-07-17 — İnsan onay/red kararlarının `approval.decided` audit_event'i ile atomik yazılması

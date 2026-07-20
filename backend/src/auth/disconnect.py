@@ -24,6 +24,14 @@ from datetime import datetime
 
 from ..db.models import AuditEvent
 from ..db.oauth_store import TokenRepository
+from ..db.postgres_repository import (
+    PostgresAdsAccountRepository,
+    PostgresAuditRepository,
+    PostgresCredentialRevocationRepository,
+    PostgresOAuthCredentialRepository,
+    PostgresTokenRepository,
+    PostgresWebSessionRepository,
+)
 from ..db.proposals import AuditRepository
 from ..db.repository import AdsAccountRepository, OAuthCredentialRepository
 from ..db.web_session_store import WebSessionRepository
@@ -84,6 +92,57 @@ def disconnect_principal(
             approval_id=None,
             execution_id=None,
             outcome="revoked",
+            reason_code=None,
+            correlation_id=_safe_correlation_id(correlation_id),
+            google_request_id=None,
+        )
+    )
+    return DisconnectResult(
+        credential_revoked=credential is not None,
+        accounts_disconnected=len(linked_accounts),
+    )
+
+
+def disconnect_principal_durable(
+    principal_id: str,
+    *,
+    tokens: PostgresTokenRepository,
+    credentials: PostgresOAuthCredentialRepository,
+    credential_revocations: PostgresCredentialRevocationRepository,
+    accounts: PostgresAdsAccountRepository,
+    audit: PostgresAuditRepository,
+    now: datetime,
+    web_sessions: PostgresWebSessionRepository,
+    correlation_id: str | None = None,
+) -> DisconnectResult:
+    """Atomically stop DB access and enqueue eventual vault revocation.
+
+    The caller must provide repositories from one principal-bound PostgreSQL
+    unit of work. No vault/network call occurs here: committing the outbox job
+    before a separate worker touches the vault closes the DB-vault atomicity gap
+    described by ADR-0007.
+    """
+    linked_accounts = accounts.list_accounts(principal_id)
+    tokens.revoke_all_for_principal(principal_id, now=now)
+    credential = credentials.get_active(principal_id)
+    if credential is not None:
+        job = credential_revocations.revoke_and_enqueue(principal_id, credential.id, now=now)
+        if job is None:
+            raise RuntimeError("Owned credential disappeared before revocation enqueue")
+    accounts.disconnect_all(principal_id)
+    web_sessions.revoke_all_for_principal(principal_id)
+    audit.insert(
+        AuditEvent(
+            event_id=str(uuid.uuid4()),
+            occurred_at=now,
+            actor=principal_id,
+            principal_id=principal_id,
+            customer_id=None,
+            event_type="principal.disconnected",
+            proposal_id=None,
+            approval_id=None,
+            execution_id=None,
+            outcome="revocation_queued" if credential is not None else "revoked",
             reason_code=None,
             correlation_id=_safe_correlation_id(correlation_id),
             google_request_id=None,

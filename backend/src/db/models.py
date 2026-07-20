@@ -25,6 +25,13 @@ class CredentialStatus(StrEnum):
     INVALID = "invalid"
 
 
+class CredentialRevocationStatus(StrEnum):
+    """Durable vault-revocation work state (ADR-0007)."""
+
+    PENDING = "pending"
+    COMPLETED = "completed"
+
+
 class ExecutionStatus(StrEnum):
     """DATABASE.md kararı: execution outbox ``pending -> applied|failed|unknown`` ilerler."""
 
@@ -67,6 +74,22 @@ class OAuthCredential:
     status: CredentialStatus
     key_version: int
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class CredentialRevocationJob:
+    """Secret-free snapshot used to revoke one credential from the vault."""
+
+    id: str
+    principal_id: str
+    credential_id: str
+    vault_ref: str
+    status: CredentialRevocationStatus
+    attempts: int
+    next_attempt_at: datetime
+    last_error_code: str | None
+    created_at: datetime
+    completed_at: datetime | None
 
 
 @dataclass(frozen=True)

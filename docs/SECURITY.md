@@ -237,7 +237,7 @@ logging) eklendiğinde bu tablo aynı değişiklikte güncellenir.
 | B3 | Connector Authorization Server (`backend/src/auth`, hand-rolled, ADR-0002) | Kısmen | Bizim kodumuz; state/PKCE/redirect_uri/resource binding'i taşır. |
 | B4 | Google OAuth (upstream) | Hayır (dış taraf) | Yalnız Google'ın imzaladığı sonucu kabul ederiz; kendi `state`/PKCE'imizle bağlarız. |
 | B5 | Approval tarayıcısı (`/login` + `/approvals`, insan) | Kısmen | `adwords` scope istemez, Google Ads'e yazmaz; yalnız yerel proposal karar kaydı. |
-| B6 | DB (SQLite prototip; production Postgres — `todo.md` 4.x) | Evet (uygulama süreci) | Principal-scoped repository filtreleri tek savunma katmanı; RLS henüz yok (4.3 açık). |
+| B6 | DB (SQLite prototip; production Postgres — `todo.md` 4.x) | Evet (uygulama süreci) | Principal-scoped repository filtreleri birinci katman; production Alembic RLS migration'ı, transaction-local principal context helper'ı, PostgreSQL transaction helper'ı ve ilk SQLAlchemy repository dilimi (`principal`, `oauth_client_grant`, `ads_account`, `oauth_credential`) eklendi. `ADDOBSERVER_POSTGRES_TEST_DSN` ile çalışan canlı PostgreSQL izolasyon testi var, fakat bu ortamda DSN olmadığı ve kalan production repository/app yolları henüz SQLAlchemy'ye taşınmadığı için 4.3 açık. |
 | B7 | Vault (yerel Fernet — `auth/vault.py`; production KMS — `todo.md` 10.6) | Evet (uygulama süreci) | Refresh token/secret yalnız burada düz metin; DB'de yalnız referans/hash. |
 | B8 | Queue / async worker | Yok | Henüz uygulanmadı; ARCHITECTURE.md bileşen listesinde yer alsa da kod karşılığı yok — bu tehdit modelinde "N/A, eklenince genişletilir" olarak işaretli. |
 | B9 | Observability (structured log/trace) | Yok | Faz 9.1 açık; bugün `backend/src`'de `logging`/`print` çağrısı yok (bkz. Faz 2.2 kanıtı), bu yüzden "log'a sızma" bugün gerçek bir yüzey değil. |
@@ -252,7 +252,7 @@ logging) eklendiğinde bu tablo aynı değişiklikte güncellenir.
 | T3 | Confused deputy — bir client'ın başka client'ın authorization code'unu veya kaynağını kendi adına kullanması (Kimlik sahteciliği) | B3↔B4 | Authorization code; `client_id`, `redirect_uri`, PKCE verifier ve `resource` ile bağlanır; uyuşmazlıkta `invalid_client`/`invalid_grant`. | `backend/tests/test_auth_authorization_flow_http.py` (cross-client redeem reddi, yanlış PKCE reddi) | Yok — üretim davranışını uçtan uca egzersiz eden HTTP testiyle kapatıldı (Faz 3.3). |
 | T4 | SSRF — CIMD `client_id` URL'i saldırganın kontrolündeki bir host'a işaret eder (Yetki yükseltme) | B1→B3 | `https://` allowlist, DNS-rebinding TOCTOU pini (tek çözümleme, doğrulanmış IP'ye bağlanma), redirect=0, response-size streaming sınırı, `application/json` Content-Type zorunluluğu. | `auth/cimd.py`, `backend/tests/test_auth_cimd.py` (IPv4-mapped/NAT64/encoded-host/TOCTOU dahil) | Yok — bilinen bypass sınıfları ampirik olarak test edildi (Faz 3.2). |
 | T5 | Prompt injection — reklam metni/keyword/rationale içine gömülü talimatın tool scope/customer/proposal tipini değiştirmesi (Kurcalama) | B1→B2 | Untrusted metin sabit alan-getter sözlüğünde tek, minimize alan olarak döner; `customer_id`/`campaign_id`/`proposal_type` ayrı doğrulanmış parametrelerdir, rationale metninden asla türetilmez. | `backend/tests/test_prompt_injection_safety.py` | Yok — hem adapter hem gerçek MCP Streamable HTTP protokolü üzerinden kanıtlandı (Faz 2.4). |
-| T6 | IDOR / cross-principal veya cross-customer erişim (Bilgi ifşası, Yetki yükseltme) | B2↔B6 | Her repository metodu `principal_id` zorunlu parametresiyle filtreler; opaque ID'ler (`transaction_id`/`proposal_id`/vb.) DB sorgusundan önce biçim doğrulamasından geçer; cross-principal ve var-olmayan kaynak aynı hata şeklini döner. | `api/identifiers.py`, `backend/tests/test_api_identifiers.py`, `backend/tests/test_db_proposals.py` | RLS (DB-seviyesi ikinci savunma katmanı) henüz yok — bugünkü izolasyon tamamen uygulama katmanı disiplinine dayanır (`todo.md` 4.3). |
+| T6 | IDOR / cross-principal veya cross-customer erişim (Bilgi ifşası, Yetki yükseltme) | B2↔B6 | Her repository metodu `principal_id` zorunlu parametresiyle filtreler; opaque ID'ler (`transaction_id`/`proposal_id`/vb.) DB sorgusundan önce biçim doğrulamasından geçer; cross-principal ve var-olmayan kaynak aynı hata şeklini döner. Production şemasında principal-scoped tablolar için `ENABLE` + `FORCE ROW LEVEL SECURITY` policy migration'ı vardır; `db/postgres.py::principal_transaction` transaction başında RLS principal context'ini set eder; `db/postgres_repository.py` ilk identity/account/credential repository diliminde commit etmeden aynı principal filtre contract'ını taşır. | `api/identifiers.py`, `backend/tests/test_api_identifiers.py`, `backend/tests/test_db_proposals.py`, `backend/tests/test_sqlalchemy_schema.py`, `backend/tests/test_postgres_runtime.py`, `backend/tests/test_postgres_repository.py`, `backend/tests/test_postgres_rls_integration.py` | RLS contract/runtime helper ve ilk SQLAlchemy repository contract testleri yerelde çalışır. Canlı PostgreSQL cross-principal CRUD/pool reuse/privileged-role testi `ADDOBSERVER_POSTGRES_TEST_DSN` gerektirir ve bu ortamda skip etmiştir; kalan production SQLAlchemy repository/app wiring hâlâ açık (`todo.md` 4.3). |
 | T7 | CSRF — `/approvals` karar, `/disconnect`, `/logout`, `/authorize/consent` (Kurcalama) | B5→B3/B2 | Session'dan bağımsız üretilmiş synchronizer token, yalnız hash olarak saklanır, `secrets.compare_digest` ile doğrulanır; `SameSite=Strict` cookie. | `backend/tests/test_approvals_http.py`, `backend/tests/test_auth_server_http.py::AuthorizeConsentCsrfTests` | Yok. |
 | T8 | Authorization code / state replay (Kurcalama) | B3↔B4 | Kod tek kullanımlık atomik `UPDATE ... WHERE consumed_at IS NULL` ile claim edilir; `state` kısa ömürlü ve callback'te tüketilir. | `backend/tests/test_auth_authorization_flow_http.py` (ikinci `/token` denemesi `invalid_grant`), `backend/tests/test_oauth_store.py::ConcurrentAuthorizationCodeClaimTests` (gerçek iki-thread race) | Yok. |
 | T9 | Session fixation / çalıntı `web_session` çerezinin disconnect sonrası hâlâ geçerli kalması (Kimlik sahteciliği) | B5↔B6 | Her girişte taze `secrets.token_urlsafe` session+CSRF çifti (fixation yok); `disconnect_principal` principal'ın **tüm** `web_session` satırlarını iptal eder, yalnız isteği yapan çerezi değil. | `backend/tests/test_auth_web_session.py`, `backend/tests/test_auth_disconnect.py` | Riskli eylemler için re-auth/step-up eşiği henüz kararlaştırılmadı (`todo.md` 7.3, WRITE kapsamı sonrasına bloke). |
@@ -269,6 +269,24 @@ logging) eklendiğinde bu tablo aynı değişiklikte güncellenir.
 - Audit retention süresi ve WORM sağlayıcısı.
 
 ## Güncelleme geçmişi
+
+- 2026-07-19 — PostgreSQL reporting credential çözümlemesi metadata, vault ve provider aşamalarına ayrıldı;
+  secret/vault ve Google Ads ağ çağrıları açık DB transaction içinde yürütülmez.
+- 2026-07-19 — Refresh-token replay family revocation'ının PostgreSQL transaction'da rollback olması
+  engellendi; replay cevabı yalnız revoke state commit edildikten sonra döner.
+
+- 2026-07-19 — PostgreSQL `/token` RLS bootstrap'ı exact SHA-256 code hash'ine bağlı, transaction-local
+  ve yalnız `SELECT` yetkili policy ile kapatıldı. Principal çözülür çözülmez hash context temizlenir ve
+  normal principal RLS context kurulur; runtime rolüne `BYPASSRLS`, tablo sahipliği veya `SECURITY DEFINER`
+  verilmez. PostgreSQL'in [RLS](https://www.postgresql.org/docs/current/ddl-rowsecurity.html) ve
+  [CREATE POLICY](https://www.postgresql.org/docs/current/sql-createpolicy.html) kuralları temel alındı.
+- 2026-07-19 — Tam ASGI PostgreSQL transaction/repository wiring'i tamamlanana kadar production startup
+  fail-closed kapatıldı. `DATABASE_URL`'yi yok sayıp SQLite ile production açılması principal izolasyonu
+  ihlali sayılır; local/test çalışma yolu korunur.
+- 2026-07-19 — Authorization code ile aynı exact-hash/SELECT-only RLS bootstrap deseni access ve refresh
+  token tablolarına genişletildi. Böylece bearer doğrulama ve refresh grant principal bilinmeden başlayabilir,
+  fakat yalnız sunulan token'ın hash satırını görebilir; hash context hemen temizlenir ve yazmalar normal
+  principal policy üzerinden yürür.
 
 - 2026-07-18 — DPoP açık sorusu `docs/decisions/0004-dpop-deferred.md` ile kapatıldı (Faz 2.5):
   hem Google upstream refresh token hem connector'ın kendi access/refresh token'ı için DPoP
@@ -324,6 +342,13 @@ logging) eklendiğinde bu tablo aynı değişiklikte güncellenir.
   zaten kapsıyordu (`is_private` mapped adresler için gömülü IPv4'e delege eder; `64:ff9b::/96`
   uzun süredir `is_reserved` olan `::/8` bloğunun içinde kalır) — kod değişikliği gerekmedi, yalnız
   regresyon testi eksikti (`backend/tests/test_auth_cimd.py`).
+- 2026-07-18 — Faz 4.3 ilk artış: production PostgreSQL şemasına principal-scoped RLS migration'ı
+  ve transaction-local principal context helper'ı eklendi. Tehdit modeli RLS'i artık contract-test
+  kapsamındaki ikinci savunma katmanı olarak işaretler; `db/postgres.py` helper'ı production
+  `DATABASE_URL`'i PostgreSQL'e sınırlar ve principal transaction context'ini testle kanıtlar.
+  `db/postgres_repository.py` ilk SQLAlchemy repository dilimiyle principal/client-grant/account/credential
+  izolasyon contract'ını production metadata üzerinde taşımaya başladı. Canlı PostgreSQL izolasyon testi DSN'e bağlı olduğu ve
+  kalan production repository/app wiring tamamlanmadığı için 4.3 artık riski açık kalır.
 - 2026-07-17 — `/approvals` insan onay yüzeyi için CSRF token + cookie özniteliği kararı eklendi
   (docs/AUTH.md).
 - 2026-07-17 — Public HTTP güvenlik header'ları ve `/logout` CSRF doğrulaması uygulama standardına eklendi.

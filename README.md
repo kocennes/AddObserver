@@ -84,8 +84,21 @@ python -m unittest discover -s backend/tests -v      # veya: pytest backend/test
 ruff format --check backend
 ruff check backend
 pyright backend/src
+Push-Location backend; python -m alembic -c alembic.ini upgrade head --sql; Pop-Location
 bandit -c backend/pyproject.toml -r backend/src
 pip-audit
+```
+
+Production PostgreSQL runtime helper'ları `DATABASE_URL` ister; yerel varsayılan akış hâlâ
+SQLite prototiptir. `DATABASE_URL` parola içerebileceği için log/çıktı/dokümana gerçek değer
+yazılmamalıdır.
+
+Canlı PostgreSQL RLS entegrasyon testi yalnız disposable bir test veritabanı DSN'i açıkça verilirse
+çalışır; aksi halde skip eder:
+
+```powershell
+$env:ADDOBSERVER_POSTGRES_TEST_DSN = "postgresql+psycopg://user:pass@localhost:5432/addobserver_test"
+python -m unittest backend.tests.test_postgres_rls_integration -v
 ```
 
 ```powershell
@@ -98,9 +111,8 @@ pytest, mevcut `unittest.TestCase` testlerini değiştirmeden aynen çalıştır
 çıktı ve coverage ekler); `unittest discover` hâlâ bağımsız bir doğrulama yoludur. `.secrets.baseline`
 Windows'ta yeniden üretilirse (`detect-secrets scan --all-files > .secrets.baseline`) dosyadaki yol
 ayırıcıları `\` yerine `/` olacak şekilde normalize edilmelidir (bkz. `docs/TESTING.md`) — aksi halde
-Linux CI'da her satır "yeni secret" gibi görünür. `pyright` ve `ruff check` şu an mevcut kodda sırasıyla
-tip anotasyonu ve format/modernizasyon borcu bulunduğunu raporlar (bkz. `todo.md` 1.6/1.7); bu iki
-komutun sıfır bulguya inmesi henüz zorunlu kalite kapısı değildir.
+Linux CI'da her satır "yeni secret" gibi görünür. Alembic komutu canlı DB'ye bağlanmadan PostgreSQL
+DDL çıktısı üretir; gerçek migration çalıştırma production/staging runbook ve secret/config gerektirir.
 
 Mimari, ürün, auth, veri modeli, API/MCP sözleşmesi ve tasarım kararları ürün sahibi tarafından
 onaylanıp `Kabul edildi` durumuna geçirildi; `backend/` iskeleti bu kararlar üzerine küçük, test

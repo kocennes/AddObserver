@@ -13,6 +13,9 @@ dependencies = [
     "cryptography>=43.0",
     "google-ads>=31.1.0",
     "mcp>=1.28.0",
+    "SQLAlchemy>=2.0",
+    "Alembic>=1.13",
+    "psycopg[binary]>=3.2",
 ]
 
 # Dev/CI quality tooling selected in docs/decisions/0003-dev-tooling.md. `pytest`

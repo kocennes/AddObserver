@@ -23,9 +23,22 @@ from ..api.queries import DateRange
 from ..api.reporting import GoogleAdsCredentials, GoogleAdsReportingClient, ReportPage
 from ..auth.vault import VaultClient
 from ..config import Settings
+from ..db.postgres_uow import PostgresUnitOfWorkFactory
 from ..db.repository import AdsAccountRepository, OAuthCredentialRepository
-from .credentials import deactivate_credential_on_auth_failure, resolve_google_ads_credentials
-from .tool_support import READ_ONLY, READ_ONLY_LOCAL, authenticated_principal_id, close_input_schema
+from .credentials import (
+    deactivate_credential_on_auth_failure,
+    materialize_google_ads_credentials,
+    resolve_google_ads_credential_reference,
+    resolve_google_ads_credentials,
+)
+from .output_schemas import TOOL_OUTPUT_SCHEMAS
+from .tool_support import (
+    READ_ONLY,
+    READ_ONLY_LOCAL,
+    authenticated_principal_id,
+    close_input_schema,
+    set_output_schema,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +49,7 @@ class MCPToolContext:
     conn: sqlite3.Connection
     vault: VaultClient
     reporting_client: GoogleAdsReportingClient
+    postgres_uow_factory: PostgresUnitOfWorkFactory | None = None
 
 
 def _parse_date_range(start_date: str, end_date: str) -> DateRange:
@@ -56,6 +70,22 @@ def _resolve_credentials(
     context: MCPToolContext, ctx: Context, customer_id: str
 ) -> GoogleAdsCredentials:
     principal_id = authenticated_principal_id(ctx)
+    if context.postgres_uow_factory is not None:
+        with context.postgres_uow_factory.request() as work:
+            work.bind_principal(principal_id)
+            if work.repositories is None:
+                raise RuntimeError("PostgreSQL unit of work repository'leri kurulmadi")
+            reference = resolve_google_ads_credential_reference(
+                principal_id=principal_id,
+                customer_id=customer_id,
+                accounts=work.repositories.accounts,
+                oauth_credentials=work.repositories.credentials,
+            )
+        return materialize_google_ads_credentials(
+            reference=reference,
+            settings=context.settings,
+            vault=context.vault,
+        )
     return resolve_google_ads_credentials(
         principal_id=principal_id,
         customer_id=customer_id,
@@ -89,11 +119,24 @@ def _fetch_report_page(
             page_token=page_token,
         )
     except AdsApiError as error:
-        deactivate_credential_on_auth_failure(
-            error,
-            principal_id=principal_id,
-            oauth_credentials=OAuthCredentialRepository(context.conn),
-        )
+        if context.postgres_uow_factory is None:
+            deactivate_credential_on_auth_failure(
+                error,
+                principal_id=principal_id,
+                oauth_credentials=OAuthCredentialRepository(context.conn),
+            )
+        else:
+            with context.postgres_uow_factory.request() as work:
+                work.bind_principal(principal_id)
+                if work.repositories is None:
+                    raise RuntimeError(
+                        "PostgreSQL unit of work repository'leri kurulmadi"
+                    ) from None
+                deactivate_credential_on_auth_failure(
+                    error,
+                    principal_id=principal_id,
+                    oauth_credentials=work.repositories.credentials,
+                )
         raise
     return {"rows": list(page.rows), "next_page_token": page.next_page_token}
 
@@ -104,12 +147,19 @@ def register_reporting_tools(mcp: FastMCP, context: MCPToolContext) -> None:
     @mcp.tool(
         title="Bağlı Google Ads hesaplarını listele",
         annotations=READ_ONLY_LOCAL,
-        structured_output=False,
+        structured_output=True,
     )
     def list_accessible_accounts(ctx: Context) -> list[dict[str, str | None]]:
         """List the Google Ads customer_ids linked to the caller's connector session."""
         principal_id = authenticated_principal_id(ctx)
-        accounts = AdsAccountRepository(context.conn).list_active_accounts(principal_id)
+        if context.postgres_uow_factory is None:
+            accounts = AdsAccountRepository(context.conn).list_active_accounts(principal_id)
+        else:
+            with context.postgres_uow_factory.request() as work:
+                work.bind_principal(principal_id)
+                if work.repositories is None:
+                    raise RuntimeError("PostgreSQL unit of work repository'leri kurulmadi")
+                accounts = work.repositories.accounts.list_active_accounts(principal_id)
         return [
             {
                 "customer_id": account.customer_id,
@@ -119,7 +169,7 @@ def register_reporting_tools(mcp: FastMCP, context: MCPToolContext) -> None:
             for account in accounts
         ]
 
-    @mcp.tool(title="Kampanya performansı getir", annotations=READ_ONLY, structured_output=False)
+    @mcp.tool(title="Kampanya performansı getir", annotations=READ_ONLY, structured_output=True)
     def get_campaign_performance(
         ctx: Context,
         customer_id: str,
@@ -138,9 +188,7 @@ def register_reporting_tools(mcp: FastMCP, context: MCPToolContext) -> None:
             fetch=context.reporting_client.get_campaign_performance,
         )
 
-    @mcp.tool(
-        title="Reklam grubu performansı getir", annotations=READ_ONLY, structured_output=False
-    )
+    @mcp.tool(title="Reklam grubu performansı getir", annotations=READ_ONLY, structured_output=True)
     def get_ad_group_performance(
         ctx: Context,
         customer_id: str,
@@ -160,7 +208,7 @@ def register_reporting_tools(mcp: FastMCP, context: MCPToolContext) -> None:
         )
 
     @mcp.tool(
-        title="Anahtar kelime performansı getir", annotations=READ_ONLY, structured_output=False
+        title="Anahtar kelime performansı getir", annotations=READ_ONLY, structured_output=True
     )
     def get_keyword_performance(
         ctx: Context,
@@ -187,3 +235,4 @@ def register_reporting_tools(mcp: FastMCP, context: MCPToolContext) -> None:
         "get_keyword_performance",
     ):
         close_input_schema(mcp, tool_name)
+        set_output_schema(mcp, tool_name, TOOL_OUTPUT_SCHEMAS[tool_name])

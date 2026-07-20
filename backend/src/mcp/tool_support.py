@@ -56,3 +56,12 @@ def close_input_schema(mcp: FastMCP, tool_name: str) -> None:
     tool = mcp._tool_manager.get_tool(tool_name)  # noqa: SLF001 -- FastMCP has no public schema-mutation API
     assert tool is not None, f"Tool {tool_name!r} kayitli degil."  # nosec B101 -- startup-time registration invariant
     tool.parameters["additionalProperties"] = False
+
+
+def set_output_schema(mcp: FastMCP, tool_name: str, schema: dict[str, object]) -> None:
+    """Replace the SDK's permissive inferred output schema with a closed contract."""
+    tool = mcp._tool_manager.get_tool(tool_name)  # noqa: SLF001 -- no public schema API
+    assert tool is not None, f"Tool {tool_name!r} kayitli degil."  # nosec B101
+    if tool.fn_metadata.output_model is None:
+        raise RuntimeError(f"Tool {tool_name!r} structured output etkin degil")
+    tool.fn_metadata.output_schema = schema

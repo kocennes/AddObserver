@@ -145,12 +145,41 @@ class MCPIntegrationTests(unittest.IsolatedAsyncioTestCase):
         for tool in tools:
             self.assertLessEqual(len(tool.name), 64)
             self.assertIsNotNone(tool.title)
+            self.assertTrue(tool.description)
             self.assertIs(tool.inputSchema.get("additionalProperties"), False)
+            self.assertNotIn("principal_id", tool.inputSchema.get("properties", {}))
+            self.assertIsNotNone(tool.outputSchema)
+            self._assert_object_schemas_are_closed(tool.outputSchema)
             self.assertFalse(tool.annotations.destructiveHint)
             if tool.name in read_only_names:
                 self.assertTrue(tool.annotations.readOnlyHint)
+                self.assertTrue(tool.annotations.idempotentHint)
             else:
                 self.assertFalse(tool.annotations.readOnlyHint)
+                self.assertFalse(tool.annotations.idempotentHint)
+                self.assertEqual(tool.name, "prepare_proposal")
+            self.assertEqual(
+                tool.annotations.openWorldHint,
+                tool.name
+                in {
+                    "get_campaign_performance",
+                    "get_ad_group_performance",
+                    "get_keyword_performance",
+                },
+            )
+
+    def _assert_object_schemas_are_closed(self, schema) -> None:  # noqa: ANN001
+        """Recursively require every declared object shape to reject unknown fields."""
+        if not isinstance(schema, dict):
+            return
+        if schema.get("type") == "object":
+            self.assertIs(schema.get("additionalProperties"), False)
+        for value in schema.values():
+            if isinstance(value, dict):
+                self._assert_object_schemas_are_closed(value)
+            elif isinstance(value, list):
+                for item in value:
+                    self._assert_object_schemas_are_closed(item)
 
     async def test_call_tool_returns_linked_account_and_mapped_campaign_rows(self) -> None:
         fake_search = FakeGoogleAdsSearchService(
@@ -183,8 +212,24 @@ class MCPIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(accounts_result.isError)
         self.assertIn('"customer_id": "1234567890"', accounts_result.content[0].text)
+        self.assertEqual(
+            accounts_result.structuredContent,
+            {
+                "result": [
+                    {
+                        "customer_id": "1234567890",
+                        "login_customer_id": None,
+                        "status": "active",
+                    }
+                ]
+            },
+        )
         self.assertFalse(campaign_result.isError)
         self.assertIn('"rows": []', campaign_result.content[0].text)
+        self.assertEqual(
+            campaign_result.structuredContent,
+            {"rows": [], "next_page_token": None},
+        )
         self.assertEqual(len(fake_search.calls), 1)
         self.assertEqual(fake_search.calls[0]["customer_id"], "1234567890")
 

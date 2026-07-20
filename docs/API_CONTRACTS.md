@@ -44,17 +44,19 @@ edilebilir veri sözleşmelerini tanımlamak.
 | `GET /api/v1/proposals` | Önerileri listele | Principal + customer scope, opak cursor pagination, uygulandı |
 | `GET /api/v1/proposals/{id}` | Değişiklik önizle | Ownership check, uygulandı |
 | `POST /api/v1/proposals/{id}/decisions` | Onay/red | CSRF, role, immutable hash |
-| `POST /api/v1/proposals/{id}/executions` | Onaylı değişikliği uygula | Revalidation, idempotency, audit |
+| `POST /api/v1/proposals/{id}/executions` | Onaylı değişikliği uygula | Faz 8'e kadar yayımlanmaz; revalidation, idempotency, audit |
 | `GET /api/v1/audit-events` | Denetim izi | Auditor role, export audit |
 
-Execution endpoint'i ham Google Ads mutate payload kabul etmez; yalnız önceden doğrulanmış proposal ID uygular.
+Execution endpoint'i Directory v1/Faz 1'de yayımlanmaz. Faz 8 kapısı açıldığında da ham Google Ads mutate
+payload kabul etmez; yalnız önceden doğrulanmış proposal ID uygular.
 
 ## Google Ads istemci sınırı
 
 - İç servis çağrısı doğrulanmış `principal_id` ve `customer_id` alır; MCP tool principal ID kabul etmez,
   resource server token subject'inden türetir ve active hesap eşlemesini doğrular.
 - GAQL sorguları kodda tanımlı query object/allowlist ile kurulur. Tarih ve ID parametreleri doğrulanır.
-- Mutate adapter yalnız `PRODUCT.md` içinde kabul edilmiş işlem türlerini destekler.
+- Mutate adapter Directory v1/Faz 1'de yoktur; Faz 8 kapısı açılırsa yalnız `PRODUCT.md` içinde kabul edilmiş
+  işlem türlerini destekler.
 - `validate_only` mümkün olan işlemlerde onay öncesi kullanılır; başarı canlı uygulama sayılmaz.
 - Retry yalnız belgelenmiş retryable hatalarda, jitter ve quota `retry_delay` ile yapılır. Mutate sonucu belirsizse
   önce Google durumu okunur; kör tekrar yapılmaz.
@@ -93,11 +95,16 @@ biri olabilir; `campaign_id` en fazla 19 haneli (`int64`) sayısal bir kimlik ol
 
 ## Açık sorular
 
-- İlk reporting alanları ve management allowlist'i Google RMF sınıflandırmasına bağlıdır.
+- İlk live management/execution allowlist'i Google RMF sınıflandırmasına bağlıdır.
 - Public MCP dışında ayrı kullanıcı-facing HTTP API yayınlanıp yayınlanmayacağı.
 
 ## Güncelleme geçmişi
 
+- 2026-07-19 — Bearer HTTP API route'larının production veri erişimi PostgreSQL request unit-of-work
+  sınırına bağlandı; exact token bootstrap ve principal-scoped sorgu aynı transaction içinde yürür.
+- 2026-07-18 — Faz 1.1 kapsam kararı kapatıldı: Directory v1/Faz 1 public sözleşmesi reporting + proposal
+  preview/decision yüzeyleriyle sınırlıdır; `executions` endpoint'i ve Google Ads mutate adapter'ı Faz 8'e
+  kadar yayımlanmaz.
 - 2026-07-18 — Faz 1.5: `GET /api/v1/proposals` opak, imzalı keyset cursor pagination'ı uyguladı
   (bkz. `docs/API_DESIGN.md` "Pagination sözleşmesi"); daha önce yalnız `limit` ile sınırlı, ilk
   sayfanın ötesine geçemeyen ad hoc davranışın yerini aldı. `next_cursor` yalnız daha fazla satır

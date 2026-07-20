@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import httpx
 from fastapi import Request
@@ -19,6 +20,9 @@ from ..config import Settings
 from .cimd import Resolver
 from .google_oauth import GoogleOAuthClient
 from .vault import VaultClient
+
+if TYPE_CHECKING:
+    from ..db.postgres_uow import PostgresUnitOfWorkFactory
 
 
 @dataclass
@@ -35,6 +39,10 @@ class AuthContext:
     #: browser login (docs/AUTH.md) -- never requests ``adwords`` and never
     #: touches ``vault``/``oauth_credential``/``oauth_client_grant``.
     login_google_client: GoogleOAuthClient | None = None
+    #: Optional production transaction/repository provider. Routes migrate to
+    #: this factory incrementally; production startup remains disabled until all
+    #: request paths use it.
+    postgres_uow_factory: PostgresUnitOfWorkFactory | None = None
 
 
 def get_context(request: Request) -> AuthContext:

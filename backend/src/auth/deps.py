@@ -14,10 +14,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Protocol
 
 from fastapi import HTTPException, Request
 
-from ..db.oauth_store import TokenRepository
+from .domain import AccessToken
+
+
+class AccessTokenStore(Protocol):
+    """Minimal repository contract required for bearer verification."""
+
+    def get_access(self, raw_token: str) -> AccessToken | None:
+        """Return the active token metadata matching ``raw_token``, if any."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,7 +59,7 @@ def extract_bearer_token(authorization_header: str | None) -> str | None:
 
 def verify_access_token(
     raw_token: str,
-    tokens: TokenRepository,
+    tokens: AccessTokenStore,
     *,
     expected_resource: str,
     now: datetime,
@@ -89,7 +98,7 @@ def www_authenticate_header(
 
 
 def require_principal(
-    tokens: TokenRepository, *, expected_resource: str, protected_resource_metadata_url: str
+    tokens: AccessTokenStore, *, expected_resource: str, protected_resource_metadata_url: str
 ):
     """FastAPI dependency factory: verifies the request's bearer token or raises 401.
 

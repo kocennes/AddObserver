@@ -21,13 +21,14 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from ..auth.deps import (
+    AccessTokenStore,
     AuthenticatedPrincipal,
     BearerTokenError,
     extract_bearer_token,
     verify_access_token,
     www_authenticate_header,
 )
-from ..db.oauth_store import TokenRepository
+from ..db.postgres_uow import PostgresUnitOfWorkFactory
 
 
 class PrincipalAuthMiddleware:
@@ -43,14 +44,16 @@ class PrincipalAuthMiddleware:
         self,
         app: ASGIApp,
         *,
-        tokens_factory: Callable[[], TokenRepository],
+        tokens_factory: Callable[[], AccessTokenStore],
         expected_resource: str,
         protected_resource_metadata_url: str,
+        postgres_uow_factory: PostgresUnitOfWorkFactory | None = None,
     ) -> None:
         self._app = app
         self._tokens_factory = tokens_factory
         self._expected_resource = expected_resource
         self._metadata_url = protected_resource_metadata_url
+        self._postgres_uow_factory = postgres_uow_factory
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -68,12 +71,7 @@ class PrincipalAuthMiddleware:
             return
 
         try:
-            principal = verify_access_token(
-                raw_token,
-                self._tokens_factory(),
-                expected_resource=self._expected_resource,
-                now=datetime.now(UTC),
-            )
+            principal = self._verify(raw_token)
         except BearerTokenError as error:
             await self._deny(scope, receive, send, header, error.description)
             return
@@ -83,6 +81,28 @@ class PrincipalAuthMiddleware:
         # ``request.state`` wraps ``scope["state"]`` by reference, not a copy.
         scope.setdefault("state", {})["principal"] = principal
         await self._app(scope, receive, send)
+
+    def _verify(self, raw_token: str) -> AuthenticatedPrincipal:
+        """Verify a token using SQLite locally or a short PostgreSQL RLS transaction."""
+        if self._postgres_uow_factory is None:
+            tokens = self._tokens_factory()
+            return verify_access_token(
+                raw_token,
+                tokens,
+                expected_resource=self._expected_resource,
+                now=datetime.now(UTC),
+            )
+
+        with self._postgres_uow_factory.request() as work:
+            work.bootstrap_access_token(raw_token)
+            if work.repositories is None:
+                raise RuntimeError("PostgreSQL unit of work repository'leri kurulmadi")
+            return verify_access_token(
+                raw_token,
+                work.repositories.tokens,
+                expected_resource=self._expected_resource,
+                now=datetime.now(UTC),
+            )
 
     @staticmethod
     async def _deny(

@@ -44,6 +44,19 @@ def _settings() -> Settings:
 
 
 class AppLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_production_startup_fails_closed_instead_of_using_sqlite(self) -> None:
+        production = dataclasses.replace(
+            _settings(),
+            environment="production",
+            database_url="postgresql+psycopg://runtime:secret@db.example/addobserver",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Production startup is disabled") as raised:
+            create_app(production, google_client=FakeGoogleOAuthClient())
+
+        self.assertNotIn("runtime:secret", str(raised.exception))
+        self.assertFalse(Path(production.sqlite_db_path).exists())
+
     async def test_rejects_streamed_oversized_request_without_content_length(self) -> None:
         sent_messages: list[dict[str, Any]] = []
         receive_messages = [

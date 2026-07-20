@@ -51,8 +51,9 @@ Remote Google Ads MCP connector'ünü Anthropic Connectors Directory'ye gönderm
 
 - Read ve write kesin ayrıdır; catch-all `api_request`, raw GAQL veya raw mutate yoktur.
 - Her tool: ≤64 karakter ad, insan-okur `title`, dar açıklama, kapalı input/output schema ve doğru annotation.
-- Read-only: `readOnlyHint: true`. Google Ads'te değişiklik yapan tool: `destructiveHint: true`; kullanıcıya
-  Claude confirmation ek olarak backend immutable approval kapısı uygulanır.
+- Read-only: `readOnlyHint: true`. Directory v1/Faz 1'de Google Ads'te değişiklik yapan tool yoktur. Böyle
+  bir tool Faz 8'de açılırsa `destructiveHint: true` taşır; kullanıcıya Claude confirmation ek olarak backend
+  immutable approval kapısı uygulanır.
 - Geçerli parametre başarı döndürür; invalid/unauthorized/quota hata mesajları actionable ve secret-free'dir.
 - Tool cevapları page/limit/field allowlist ile token-frugal olur. Conversation history, Claude memory veya
   kullanıcı dosyaları istenmez/toplanmaz.
@@ -84,11 +85,13 @@ izlenir ve kritik sorun düzeltilene kadar etkilenen tool veya connector kontrol
 ## Açık sorular
 
 - Verified domain, OAuth authorization server ürünü ve connector'ın public ürün adı.
-- Directory formunda yazma kabiliyeti için beklenen reviewer onay UX'i.
 - Test hesabı credential'larının Anthropic'e güvenli teslim kanalı ve rotasyonu.
 - MCP Apps UI gerekip gerekmediği; ilk faz yalnız tools ise screenshot şartı uygulanmayabilir.
 
 ## Güncelleme geçmişi
 
+- 2026-07-18 — Faz 1.1 kapsam kararı kapatıldı: Directory v1 submission paketi Google Ads live write
+  kabiliyeti beyan etmez; local `prepare_proposal` Google Ads'e dokunmayan proposal hazırlama tool'u olarak
+  belgelenir.
 - 2026-07-17 — 2026 Anthropic submission, review, auth ve directory policy gereksinimleri kaynaklandırıldı.
 - 2026-07-17 — Yayın sonrası bakım/güvenlik yanıtı ve `ui/open-link` allowed-URI beyan kapıları eklendi.

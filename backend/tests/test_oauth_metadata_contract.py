@@ -48,9 +48,7 @@ class HttpsProductionInvariantTests(unittest.TestCase):
     """OAuth 2.1 / MCP Authorization require every AS endpoint to be served over HTTPS."""
 
     def test_non_local_environment_with_plain_http_base_url_fails_closed(self) -> None:
-        settings = _settings(
-            environment="production", public_base_url="http://connector.example.com"
-        )
+        settings = _settings(environment="staging", public_base_url="http://connector.example.com")
 
         with self.assertRaises(RuntimeError):
             create_app(settings, google_client=FakeGoogleOAuthClient())
@@ -63,7 +61,7 @@ class HttpsProductionInvariantTests(unittest.TestCase):
         self.assertIsNotNone(app)
 
     def test_non_local_environment_with_https_base_url_succeeds(self) -> None:
-        settings = _settings(environment="production")
+        settings = _settings(environment="staging")
 
         app = create_app(settings, google_client=FakeGoogleOAuthClient())
 

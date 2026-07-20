@@ -36,6 +36,7 @@ from .auth.server import router as auth_router
 from .auth.vault import LocalEncryptedVault, VaultClient
 from .config import Settings
 from .db.connection import connect
+from .db.postgres_uow import PostgresUnitOfWorkFactory
 from .mcp.server import build_mcp_server, wrap_with_principal_auth
 
 #: Scopes for the ``/approvals`` browser login only -- deliberately excludes
@@ -64,6 +65,7 @@ SECURITY_RESPONSE_HEADERS = {
 #: guvenligi"): HSTS on a plain-HTTP local dev response is meaningless and would be actively
 #: wrong (browsers cache it per-host and there is no cert to fall back to).
 HSTS_HEADER = (b"strict-transport-security", b"max-age=63072000; includeSubDomains")
+PRODUCTION_ENVIRONMENTS = frozenset({"prod", "production"})
 
 
 def _problem_response(
@@ -240,6 +242,7 @@ def create_app(
     google_client: GoogleOAuthClient | None = None,
     login_google_client: GoogleOAuthClient | None = None,
     reporting_client: GoogleAdsReportingClient | None = None,
+    postgres_uow_factory: PostgresUnitOfWorkFactory | None = None,
 ) -> FastAPI:
     """Build the full connector app: OAuth 2.1 AS routes + the auth-protected ``/mcp`` endpoint.
 
@@ -250,6 +253,13 @@ def create_app(
     or making real Google Ads calls.
     """
     settings = settings or Settings.load()
+    if settings.environment.lower() in PRODUCTION_ENVIRONMENTS:
+        raise RuntimeError(
+            "Production startup is disabled until every HTTP/MCP/auth repository path uses "
+            "PostgreSQL request transactions with RLS context; falling back to "
+            "LOCAL_SQLITE_DB_PATH "
+            "would violate docs/DATABASE.md and principal isolation."
+        )
     if settings.environment != "local" and not settings.public_base_url.startswith("https://"):
         raise RuntimeError(
             "PUBLIC_BASE_URL 'https://' ile baslamali (APP_ENVIRONMENT='local' disinda) -- "
@@ -286,9 +296,18 @@ def create_app(
 
     http_client = httpx.Client(timeout=10.0)
     mcp_server = build_mcp_server(
-        settings=settings, conn=conn, vault=vault, reporting_client=reporting_client
+        settings=settings,
+        conn=conn,
+        vault=vault,
+        reporting_client=reporting_client,
+        postgres_uow_factory=postgres_uow_factory,
     )
-    mcp_app = wrap_with_principal_auth(mcp_server, settings=settings, conn=conn)
+    mcp_app = wrap_with_principal_auth(
+        mcp_server,
+        settings=settings,
+        conn=conn,
+        postgres_uow_factory=postgres_uow_factory,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -330,6 +349,7 @@ def create_app(
         google_client=google_client,
         http_client=http_client,
         login_google_client=login_google_client,
+        postgres_uow_factory=postgres_uow_factory,
     )
     app.include_router(auth_router)
     app.include_router(approvals_router)

@@ -47,6 +47,9 @@ class ResolveGoogleAdsCredentialsTests(unittest.TestCase):
             "https://accounts.google.com", "sub-1"
         )
 
+    def tearDown(self) -> None:
+        self.conn.close()
+
     def _resolve(self, *, principal_id: str, customer_id: str):
         return resolve_google_ads_credentials(
             principal_id=principal_id,
@@ -135,6 +138,9 @@ class DeactivateCredentialOnAuthFailureTests(unittest.TestCase):
         )
         vault_ref = self.vault.store("google-refresh-token")
         self.oauth_credentials.upsert(self.principal.id, vault_ref, key_version=1)
+
+    def tearDown(self) -> None:
+        self.conn.close()
 
     def _error(self, error_class: ErrorClass) -> AdsApiError:
         return AdsApiError(

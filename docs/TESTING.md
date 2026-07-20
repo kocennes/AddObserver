@@ -79,19 +79,29 @@ kapsam dışı bırakıldı:
   gerçek çalıştırma kanıtı `todo.md` 10.2 (CI pipeline) veya standart bir yerel Python kurulumunda
   sağlanmalı.
 
-`ruff format --check` ve `pyright`, henüz normalize edilmemiş/tip anotasyonu eksik mevcut kod
-üzerinde sırasıyla ~370 mekanik format/modernizasyon uyarısı (satır uzunluğu, `datetime.UTC`,
-import sırası vb. — hepsi `ruff format`/`ruff check --fix` ile otomatik düzelir) ve 56 tip hatası
-(çoğunlukla gevşek/eksik anotasyon, ör. `Connection` yerine `object`) raporluyor. Bu, güvenlik
-hardening branch'ini büyük, ilgisiz bir reformat/anotasyon diff'iyle şişirmemek için bilinçli
-olarak bu değişiklikte düzeltilmedi; ayrı, yalnız-format ve yalnız-anotasyon commit'leri olarak
-`todo.md`'ye eklendi (1.6, 1.7). Bu iki komutun temiz çıkması henüz merge kapısı değildir.
+`ruff format --check`, `ruff check` ve `pyright backend/src` mevcut kodda temizdir (bkz. `todo.md`
+1.6/1.7). PostgreSQL production şeması için Alembic offline SQL üretimi canlı DB'ye bağlanmadan
+`backend/` dizininden `python -m alembic -c alembic.ini upgrade head --sql` ile doğrulanır.
+Canlı RLS entegrasyon testleri yalnız `ADDOBSERVER_POSTGRES_TEST_DSN` disposable bir PostgreSQL test
+veritabanına ayarlandığında çalışır; DSN yoksa `backend.tests.test_postgres_rls_integration` skip eder.
+PostgreSQL runtime helper contract'ı canlı DB gerektirmeden `backend.tests.test_postgres_runtime` ile
+doğrulanır: `DATABASE_URL` dialect kontrolü, DSN redaction ve principal transaction set/cleanup/rollback
+sırası test edilir.
+İlk SQLAlchemy repository contract'ı `backend.tests.test_postgres_repository` ile doğrulanır: principal
+idempotency, connector client consent scoping/re-consent, account principal scoping, active/history ayrımı,
+relink reactivation, credential active/revoke ownership, proposal payload/hash guard'ları, pending proposal
+pagination/filtering, approval/audit principal scoping, execution idempotency/result ownership ve
+repository'nin kendi transaction'ını commit etmemesi.
 
 ## Test piramidi
 
 - **Unit:** şema, policy, para micros dönüşümü, state machine, retry sınıflandırma.
 - **Integration:** DB isolation, repository filtreleri, approval→execution, audit atomicity.
 - **Contract:** Google Ads ve MCP adapter request/response eşlemeleri; resmi client mock/fake.
+- **Schema:** SQLAlchemy metadata ve Alembic revision sözleşmesi; PostgreSQL-only tipler ve composite
+  ownership/idempotency constraint'leri canlı DB gerektirmeden derlenir. RLS migration'ı contract
+  testleriyle görünür kalır; gerçek PostgreSQL üzerinde cross-principal ve pool reuse izolasyonu
+  ayrı entegrasyon testleriyle kanıtlanmalıdır.
 - **UI:** bileşen durumları, klavye, erişilebilir adlar, onay özeti ve error recovery.
 - **E2E:** test hesabı veya tamamıyla fake servisle veri→öneri→onay→uygulama→audit.
 
@@ -186,6 +196,40 @@ Kod, test, ilgili belge, migration/rollback ve gözlemlenebilirlik birlikte tesl
 
 ## Güncelleme geçmişi
 
+- 2026-07-19 — Connector authorization transaction repository seçimi için production PostgreSQL
+  unit-of-work lifecycle ve hata rollback contract testleri eklendi (`test_postgres_authorize_routes.py`).
+  Repository contract stale consent geçişini reddeder; opsiyonel canlı PostgreSQL suite iki connection/barrier
+  ile eşzamanlı consent yarışında yalnız bir kazanan olduğunu doğrular.
+
+- 2026-07-19 — Opsiyonel PostgreSQL suite'e iki gerçek pooled connection + thread barrier kullanan duplicate
+  execution reservation yarışı eklendi. `ADDOBSERVER_POSTGRES_TEST_DSN` yoksa güvenli biçimde skip edilir.
+- 2026-07-19 — Aynı canlı suite'e authorization-code tek tüketim, refresh-token replay sonrası aile revoke
+  ve eşzamanlı approval kararında tek approval/audit yazımı yarış testleri eklendi.
+
+- 2026-07-19 — PostgreSQL `refresh_token.family_id`, domain'in ürettiği URL-safe opaque token
+  biçimiyle eşleşmesi için UUID yerine text yapıldı ve şema regresyon testi eklendi.
+- 2026-07-19 — PostgreSQL sürücüsü production bağımlılığına taşındı; bozuk `DATABASE_URL` hata
+  mesajının DSN credential'ını açığa çıkarmadığını doğrulayan runtime regresyon testi eklendi.
+
+- 2026-07-18 — Faz 4.2: PostgreSQL production şeması için SQLAlchemy metadata ve Alembic başlangıç
+  migration'ı eklendi. `backend/tests/test_sqlalchemy_schema.py`, tablo envanterini, Alembic head
+  revision'ını, principal-scoped kolon zorunluluğunu, composite proposal/principal FK'leri,
+  idempotency unique constraint'ini ve PostgreSQL DDL'de UUID/JSONB/timestamptz kullanımını doğrular.
+  Alembic offline SQL üretimi kalite komutlarına eklendi.
+- 2026-07-18 — Faz 4.3 ilk artış: `backend/tests/test_sqlalchemy_schema.py`, RLS revision'ının
+  principal-scoped tablo envanterini, `ENABLE` + `FORCE ROW LEVEL SECURITY` policy contract'ını ve
+  transaction-local principal context helper'ının UUID doğrulamasını kapsayacak şekilde genişletildi.
+  `backend/tests/test_postgres_rls_integration.py`, `ADDOBSERVER_POSTGRES_TEST_DSN` verildiğinde canlı
+  PostgreSQL üzerinde cross-principal CRUD, pool reuse ve test rolünün `BYPASSRLS`/superuser olmaması
+  vakalarını; ayrıca iki pooled connection ile aynı revocation job'ı için `FOR UPDATE SKIP LOCKED`
+  claim yarışında yalnız tek kazanan/attempt artışı/lease ilerlemesini çalıştırır. Bu ortamda DSN olmadığı
+  için canlı test skip eder ve 4.3/4.4 tamamlanma kapısı
+  açık kalır. `backend/tests/test_postgres_runtime.py`, `db/postgres.py` production helper'ının
+  PostgreSQL-only `DATABASE_URL`, secret redaction ve principal transaction set/cleanup/rollback sırasını
+  canlı DB gerektirmeden kanıtlar. `backend/tests/test_postgres_repository.py`, ilk SQLAlchemy repository
+  diliminin (`principal`, `oauth_client_grant`, `ads_account`, `oauth_credential`, `proposal`,
+  `approval`, `execution`, `audit_event`) SQLite prototip contract'ını commit etmeden taşıdığını
+  kanıtlar.
 - 2026-07-18 — Faz 3.6: İki gerçek kusur bulunup düzeltildi (bkz. `docs/AUTH.md` ve
   `docs/ERROR_HANDLING.md` "Güncelleme geçmişi" için tam detay). (1) AUTH-class bir Google Ads
   hatası (2SV, revoked/expired token, izin iptali) credential'ı hiç pasifleştirmiyordu --

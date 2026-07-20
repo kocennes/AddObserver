@@ -199,13 +199,15 @@ hafif bir tarayıcı oturumu eklendi.
 
 `docs/PRODUCT.md`'nin değişmez kabul kriteri -- "Kullanıcı disconnect ile gelecek erişimi
 durdurabilir" -- `POST /disconnect` ile karşılanır (`backend/src/auth/approvals_routes.py`,
-orkestrasyon `backend/src/auth/disconnect.py::disconnect_principal`). Aynı oturum + CSRF
+orkestrasyon `backend/src/auth/disconnect.py`). Aynı oturum + CSRF
 kanıtını `/approvals/{id}/decision` ile paylaşır (ayrı bir yetki yüzeyi eklemez). Tek çağrıda:
 
 - Principal'ın tüm connector `access_token`/`refresh_token` kayıtları iptal edilir
   (`TokenRepository.revoke_all_for_principal`) -- Claude bu connector oturumunu artık kullanamaz.
-- Aktif Google credential `revoked` işaretlenir ve kasadaki sır kalıcı olarak yok edilir
-  (`OAuthCredentialRepository.revoke_active` + `VaultClient.revoke`).
+- Aktif Google credential `revoked` işaretlenir. Local SQLite adaptörü kasadaki sırrı aynı çağrıda
+  yok eder. PostgreSQL production yolu credential snapshot'ını aynı transaction'da durable
+  `credential_revocation_job` outbox'ına yazar; commit sonrası worker vault sırrını retry edilebilir
+  biçimde yok eder. Route açık DB transaction içinde vault/network çağrısı yapmaz (ADR-0007).
 - Bağlı her `ads_account` `disconnected` işaretlenir (satır silinmez -- geçmiş kayıtlar bozulmaz).
   Canlı HTTP/MCP read ve proposal yolları yalnız `active` hesap eşleşmelerini kabul eder; aynı
   `customer_id` daha sonra yeniden bağlanırsa mevcut satır tekrar `active` yapılır.
@@ -217,6 +219,8 @@ kanıtını `/approvals/{id}/decision` ile paylaşır (ayrı bir yetki yüzeyi e
 - Tek bir `principal.disconnected` audit_event yazılır; public HTTP çağrısında kabul edilen
   `X-Correlation-ID` varsa audit kaydı aynı correlation ID'yi taşır.
 
+PostgreSQL yolunda connector token, credential/outbox, account, tüm browser session ve audit yazıları tek
+principal-bound transaction'dadır. Audit sonucu credential varsa `revocation_queued`, yoksa `revoked` olur.
 Idempotent: ikinci çağrı hata vermez, yalnız zaten iptal edilmiş olanı tekrar iptal etmeye çalışmaz.
 "Account deletion talebi" ayrıca bir silme akışı GEREKTİRMEZ -- kasadaki sır kalıcı olarak yok
 edildiği ve DB satırları zaten kimlik doğrulama için kullanılamaz hale geldiği için aynı işlem bu
@@ -230,6 +234,18 @@ kriteri de karşılar; audit_event append-only kaldığı için asla silinmez (`
 - Restricted-scope security assessment'ın server-side refresh token ve rapor verisi mimarimize uygulanma kapsamı.
 
 ## Güncelleme geçmişi
+
+- 2026-07-19 — Connector `/authorize` transaction oluşturma ile `/authorize/consent` okuma ve consent durum
+  ilerletme işlemleri PostgreSQL production yolunda kısa unit-of-work transaction'ları kullanır. Consent
+  okuma+CSRF doğrulama+`pending → consented` compare-and-set geçişi tek transaction'da atomiktir.
+
+- 2026-07-19 — Approval browser session cookie'si için PostgreSQL exact-hash RLS bootstrap eklendi;
+  `/approvals`, karar ve logout yolları bootstrap sonrası principal-scoped transaction kullanır.
+- 2026-07-19 — Login-only state creation/claim PostgreSQL repository'ye taşındı; Google code exchange açık
+  DB transaction dışında, session creation ise doğrulanmış Google subject sonrası principal RLS context'inde
+  yürür.
+- 2026-07-19 — PostgreSQL refresh-token replay tespiti artık family revoke state'ini commit ettikten sonra
+  `invalid_grant` döner; beklenen `AuthError`'ın unit-of-work rollback'iyle revoke'u geri alması engellendi.
 
 - 2026-07-18 — Faz 1.2: "Connector kullanıcı subject'i Google kimliği mi, ayrı account mı olacak?"
   sorusu `docs/decisions/0005-principal-identity-no-merge-no-recovery.md` ile kapatıldı: principal

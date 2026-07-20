@@ -11,11 +11,42 @@ same safe-message path as an adapter failure -- never a raw DB/vault exception.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Protocol
+
 from ..api.errors import AdsApiError, ErrorClass
 from ..api.reporting import GoogleAdsCredentials
 from ..auth.vault import VaultClient, VaultError
 from ..config import Settings
-from ..db.repository import AdsAccountRepository, OAuthCredentialRepository
+from ..db.models import AdsAccount, OAuthCredential
+
+
+class AccountStore(Protocol):
+    """Minimal account lookup contract shared by SQLite and PostgreSQL adapters."""
+
+    def get_active_account(self, principal_id: str, customer_id: str) -> AdsAccount | None:
+        """Return an active principal/customer link, if present."""
+        ...
+
+
+class OAuthCredentialStore(Protocol):
+    """Minimal credential metadata contract shared by DB adapters."""
+
+    def get_active(self, principal_id: str) -> OAuthCredential | None:
+        """Return the principal's active credential metadata."""
+        ...
+
+    def revoke_active(self, principal_id: str) -> OAuthCredential | None:
+        """Revoke and return the active credential metadata, if present."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class GoogleAdsCredentialReference:
+    """Non-secret DB result used after the metadata transaction closes."""
+
+    vault_ref: str
+    login_customer_id: str | None
 
 
 def resolve_google_ads_credentials(
@@ -23,8 +54,8 @@ def resolve_google_ads_credentials(
     principal_id: str,
     customer_id: str,
     settings: Settings,
-    accounts: AdsAccountRepository,
-    oauth_credentials: OAuthCredentialRepository,
+    accounts: AccountStore,
+    oauth_credentials: OAuthCredentialStore,
     vault: VaultClient,
 ) -> GoogleAdsCredentials:
     """Return credentials for a Google Ads call, or raise a safe ``AdsApiError``.
@@ -34,6 +65,27 @@ def resolve_google_ads_credentials(
     a ``customer_id`` belonging to a different principal is indistinguishable
     from an unknown one here -- both fail closed the same way.
     """
+    reference = resolve_google_ads_credential_reference(
+        principal_id=principal_id,
+        customer_id=customer_id,
+        accounts=accounts,
+        oauth_credentials=oauth_credentials,
+    )
+    return materialize_google_ads_credentials(
+        reference=reference,
+        settings=settings,
+        vault=vault,
+    )
+
+
+def resolve_google_ads_credential_reference(
+    *,
+    principal_id: str,
+    customer_id: str,
+    accounts: AccountStore,
+    oauth_credentials: OAuthCredentialStore,
+) -> GoogleAdsCredentialReference:
+    """Resolve only non-secret account/credential metadata inside a DB transaction."""
     account = accounts.get_active_account(principal_id, customer_id)
     if account is None:
         raise AdsApiError(
@@ -55,8 +107,21 @@ def resolve_google_ads_credentials(
             request_id=None,
         )
 
+    return GoogleAdsCredentialReference(
+        vault_ref=credential.vault_ref,
+        login_customer_id=account.login_customer_id,
+    )
+
+
+def materialize_google_ads_credentials(
+    *,
+    reference: GoogleAdsCredentialReference,
+    settings: Settings,
+    vault: VaultClient,
+) -> GoogleAdsCredentials:
+    """Read the vault secret after the DB transaction has closed."""
     try:
-        refresh_token = vault.read(credential.vault_ref)
+        refresh_token = vault.read(reference.vault_ref)
     except VaultError as error:
         raise AdsApiError(
             error_class=ErrorClass.AUTH,
@@ -70,12 +135,12 @@ def resolve_google_ads_credentials(
         client_id=settings.google_client_id,
         client_secret=settings.google_client_secret,
         refresh_token=refresh_token,
-        login_customer_id=account.login_customer_id,
+        login_customer_id=reference.login_customer_id,
     )
 
 
 def deactivate_credential_on_auth_failure(
-    error: AdsApiError, *, principal_id: str, oauth_credentials: OAuthCredentialRepository
+    error: AdsApiError, *, principal_id: str, oauth_credentials: OAuthCredentialStore
 ) -> None:
     """ERROR_HANDLING.md 'Auth' row: '`invalid_grant`, permission -> Credential
     pasifleştir, işleri durdur'.

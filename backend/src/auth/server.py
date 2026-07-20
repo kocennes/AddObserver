@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import secrets
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from html import escape
 from urllib.parse import urlencode, urlsplit
@@ -31,6 +33,7 @@ from ..db.oauth_store import (
     ClientGrantRepository,
     TokenRepository,
 )
+from ..db.postgres_repository import PostgresAuthorizationTransactionRepository
 from ..db.repository import OAuthCredentialRepository, PrincipalRepository
 from .approvals_routes import handle_web_login_callback
 from .cimd import fetch_client_metadata
@@ -38,6 +41,7 @@ from .context import AuthContext, get_context
 from .domain import (
     AuthError,
     AuthorizationTransaction,
+    RefreshOutcome,
     complete_transaction,
     consent_transaction,
     consume_authorization_code,
@@ -49,6 +53,25 @@ from .domain import (
 
 router = APIRouter()
 AUTHORIZE_CSRF_COOKIE = "authorize_csrf"
+
+AuthorizationTransactionStore = (
+    AuthorizationTransactionRepository | PostgresAuthorizationTransactionRepository
+)
+
+
+@contextmanager
+def _authorization_transactions(
+    context: AuthContext,
+) -> Iterator[AuthorizationTransactionStore]:
+    """Yield the configured store inside one short database transaction."""
+    if context.postgres_uow_factory is None:
+        yield AuthorizationTransactionRepository(context.conn)
+        return
+
+    with context.postgres_uow_factory.request() as work:
+        if work.repositories is None:
+            raise RuntimeError("PostgreSQL unit of work repository'leri kurulmadi")
+        yield work.repositories.authorization_transactions
 
 
 def _oauth_error(code: str, description: str, status_code: int = 400) -> JSONResponse:
@@ -154,7 +177,8 @@ async def authorize(
     except AuthError as error:
         return _error_page("Yetkilendirme isteği geçersiz", str(error), 400)
 
-    AuthorizationTransactionRepository(context.conn).save(transaction)
+    with _authorization_transactions(context) as transactions:
+        transactions.save(transaction)
 
     redirect_host = urlsplit(redirect_uri).hostname or redirect_uri
     client_host = urlsplit(client_id).hostname or client_id
@@ -205,29 +229,29 @@ async def authorize_consent(
             "İşlem bulunamadı", "Yetkilendirme işlemi bulunamadı veya süresi dolmuş.", 400
         )
 
-    transactions = AuthorizationTransactionRepository(context.conn)
-    transaction = transactions.get(transaction_id)
-    if transaction is None:
-        return _error_page(
-            "İşlem bulunamadı", "Yetkilendirme işlemi bulunamadı veya süresi dolmuş.", 400
-        )
+    with _authorization_transactions(context) as transactions:
+        transaction = transactions.get(transaction_id)
+        if transaction is None:
+            return _error_page(
+                "İşlem bulunamadı", "Yetkilendirme işlemi bulunamadı veya süresi dolmuş.", 400
+            )
 
-    try:
-        verify_consent_csrf(
-            request.cookies.get(AUTHORIZE_CSRF_COOKIE), transaction.consent_csrf_hash
-        )
-    except AuthError as error:
-        return _error_page("Yetkilendirme onayı doğrulanamadı", str(error), 400)
+        try:
+            verify_consent_csrf(
+                request.cookies.get(AUTHORIZE_CSRF_COOKIE), transaction.consent_csrf_hash
+            )
+        except AuthError as error:
+            return _error_page("Yetkilendirme onayı doğrulanamadı", str(error), 400)
 
-    if decision != "approve":
-        query = urlencode({"error": "access_denied", "state": transaction.client_state})
-        return RedirectResponse(url=f"{transaction.redirect_uri}?{query}", status_code=302)
+        if decision != "approve":
+            query = urlencode({"error": "access_denied", "state": transaction.client_state})
+            return RedirectResponse(url=f"{transaction.redirect_uri}?{query}", status_code=302)
 
-    try:
-        consented = consent_transaction(transaction, now=datetime.now(UTC))
-    except AuthError as error:
-        return _error_page("İşlem geçersiz", str(error), 400)
-    transactions.save(consented)
+        try:
+            consented = consent_transaction(transaction, now=datetime.now(UTC))
+            transactions.save(consented)
+        except AuthError as error:
+            return _error_page("İşlem geçersiz", str(error), 400)
 
     google_url = context.google_client.build_authorization_url(state=transaction_id)
     return RedirectResponse(url=google_url, status_code=302)
@@ -339,6 +363,18 @@ async def token(
     context: AuthContext = Depends(get_context),
 ) -> JSONResponse:
     now = datetime.now(UTC)
+    if context.postgres_uow_factory is not None:
+        return _postgres_token_response(
+            context=context,
+            grant_type=grant_type,
+            code=code,
+            redirect_uri=redirect_uri,
+            client_id=client_id,
+            code_verifier=code_verifier,
+            resource=resource,
+            raw_refresh_token=refresh_token,
+            now=now,
+        )
     codes = AuthorizationCodeRepository(context.conn)
     tokens = TokenRepository(context.conn)
 
@@ -374,6 +410,74 @@ async def token(
             outcome = tokens.rotate(refresh_token, now=now)
         except AuthError as error:
             return _oauth_error(error.code, str(error))
+        return _token_response(outcome.access_token, outcome.refresh_token)
+
+    return _oauth_error("unsupported_grant_type", f"Desteklenmeyen grant_type: {grant_type}")
+
+
+def _postgres_token_response(
+    *,
+    context: AuthContext,
+    grant_type: str,
+    code: str | None,
+    redirect_uri: str | None,
+    client_id: str | None,
+    code_verifier: str | None,
+    resource: str | None,
+    raw_refresh_token: str | None,
+    now: datetime,
+) -> JSONResponse:
+    """Execute a token grant inside one PostgreSQL RLS unit of work."""
+    assert context.postgres_uow_factory is not None  # nosec B101 - guarded by caller
+    if grant_type == "authorization_code":
+        if not code or not redirect_uri or not client_id or not code_verifier or not resource:
+            return _oauth_error(
+                "invalid_request", "authorization_code grant icin zorunlu alanlar eksik."
+            )
+        try:
+            with context.postgres_uow_factory.request() as work:
+                if work.bootstrap_authorization_code(code) is None:
+                    raise AuthError("invalid_grant", "Yetkilendirme kodu bulunamadi.")
+                assert work.repositories is not None  # nosec B101 - entered unit of work
+                stored, already_consumed = work.repositories.authorization_codes.claim(code)
+                grant = consume_authorization_code(
+                    stored,
+                    client_id=client_id,
+                    redirect_uri=redirect_uri,
+                    resource=resource,
+                    code_verifier=code_verifier,
+                    already_consumed=already_consumed,
+                    now=now,
+                )
+                access, refresh = issue_token_pair(grant, now=now)
+                work.repositories.tokens.save_access(access)
+                work.repositories.tokens.save_refresh(refresh)
+        except AuthError as error:
+            return _oauth_error(error.code, str(error))
+        return _token_response(access, refresh)
+
+    if grant_type == "refresh_token":
+        if not raw_refresh_token:
+            return _oauth_error(
+                "invalid_request", "refresh_token grant icin refresh_token zorunlu."
+            )
+        refresh_error: AuthError | None = None
+        outcome: RefreshOutcome | None = None
+        with context.postgres_uow_factory.request() as work:
+            try:
+                if work.bootstrap_refresh_token(raw_refresh_token) is None:
+                    raise AuthError("invalid_grant", "refresh_token bulunamadi.")
+                assert work.repositories is not None  # nosec B101 - entered unit of work
+                outcome = work.repositories.tokens.rotate(raw_refresh_token, now=now)
+            except AuthError as error:
+                # Replay detection deliberately revokes the complete token family. Keep the
+                # exception inside the unit-of-work so that security state commits; unexpected
+                # exceptions still escape and roll the transaction back.
+                refresh_error = error
+        if refresh_error is not None:
+            return _oauth_error(refresh_error.code, str(refresh_error))
+        if outcome is None:
+            raise RuntimeError("Refresh rotation outcome eksik")
         return _token_response(outcome.access_token, outcome.refresh_token)
 
     return _oauth_error("unsupported_grant_type", f"Desteklenmeyen grant_type: {grant_type}")

@@ -31,6 +31,7 @@ from ..api.reporting import GoogleAdsReportingClient
 from ..auth.vault import VaultClient
 from ..config import Settings
 from ..db.oauth_store import TokenRepository
+from ..db.postgres_uow import PostgresUnitOfWorkFactory
 from ..db.proposals import ProposalRepository
 from .auth_bridge import PrincipalAuthMiddleware
 from .proposals import register_proposal_tools
@@ -56,6 +57,7 @@ def build_mcp_server(
     conn: sqlite3.Connection,
     vault: VaultClient,
     reporting_client: GoogleAdsReportingClient | None = None,
+    postgres_uow_factory: PostgresUnitOfWorkFactory | None = None,
 ) -> FastMCP:
     """Build the ``FastMCP`` instance with every Faz 1 reporting and proposal tool registered.
 
@@ -80,6 +82,7 @@ def build_mcp_server(
         conn=conn,
         vault=vault,
         reporting_client=reporting_client or GoogleAdsReportingClient(),
+        postgres_uow_factory=postgres_uow_factory,
     )
     register_reporting_tools(mcp, tool_context)
     register_proposal_tools(mcp, tool_context, ProposalRepository(conn))
@@ -87,7 +90,11 @@ def build_mcp_server(
 
 
 def wrap_with_principal_auth(
-    mcp: FastMCP, *, settings: Settings, conn: sqlite3.Connection
+    mcp: FastMCP,
+    *,
+    settings: Settings,
+    conn: sqlite3.Connection,
+    postgres_uow_factory: PostgresUnitOfWorkFactory | None = None,
 ) -> ASGIApp:
     """Return ``mcp``'s Streamable HTTP ASGI app behind the connector's own bearer-token check.
 
@@ -105,4 +112,5 @@ def wrap_with_principal_auth(
         tokens_factory=lambda: TokenRepository(conn),
         expected_resource=settings.mcp_resource_uri,
         protected_resource_metadata_url=protected_resource_metadata_url,
+        postgres_uow_factory=postgres_uow_factory,
     )

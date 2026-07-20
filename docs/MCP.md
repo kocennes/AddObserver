@@ -61,8 +61,6 @@ token lifecycle ve Origin validation. Upstream Google token passthrough yasaktı
 
 ## Açık sorular
 
-- Google Ads'e gerçekten mutate çağrısı yapan execution tool'unun directory v1'e dahil olup olmayacağı
-  (`prepare_proposal` bu sorunun dışındadır — yalnız kendi DB'mize yazar, Google Ads'e dokunmaz).
 - MCP SDK/transport sürümü ve MCP Apps ihtiyacı.
 
 ## İlk tool envanteri (uygulandı)
@@ -76,15 +74,33 @@ token lifecycle ve Origin validation. Upstream Google token passthrough yasaktı
 
 `prepare_proposal`'ın kabul ettiği `proposal_type` docs/PRODUCT.md Faz 1.1 allowlist'iyle birebir sınırlıdır
 (`campaign_pause`, `campaign_enable`, `campaign_budget_update` — bkz. `backend/src/approval/payload_schema.py`);
-onay/uygulama tool'u henüz yoktur.
+onay/uygulama tool'u Directory v1/Faz 1'e dahil değildir ve Faz 8 Google Compliance kapısı açılmadan eklenmez.
 
 `get_proposal`, süresi dolmuş ama henüz kalıcı durum geçişi yazılmamış `pending_approval` önerilerini
 cevapta `expired` olarak gösterir. `list_proposals`, yalnız çağıranın `principal_id` kapsamındaki, süresi
 dolmamış `pending_approval` durumundaki önerileri döndürür. Opsiyonel `customer_id` filtresi verilirse
 hesap bağlantısı tekrar doğrulanır; `limit` 1-100 arasında sınırlıdır ve varsayılan 50'dir.
 
+Yedi Directory v1 tool'unun tamamı açık, kapalı output schema yayımlar. Reporting satırları yalnız ilgili
+campaign/ad group/keyword alanlarını; proposal çıktıları yalnız sürümlü allowlist payload ve dış proposal
+metadata'sını taşır. Input ve iç içe tüm output object şemaları `additionalProperties: false` kullanır.
+
 ## Güncelleme geçmişi
 
+- 2026-07-19 — Tool envanteri contract testi ad/title/description, 64 karakter sınırı, principal argümanı
+  yokluğu, read/write annotation ayrımı ve iç içe kapalı input/output schema sözleşmesini gerçek MCP
+  `tools/list` cevabında doğrular. Yedi tool structured output ve explicit allowlist schema yayımlar.
+
+- 2026-07-19 — MCP bearer doğrulaması production PostgreSQL exact-token bootstrap transaction'ına bağlandı;
+  transaction tool yürütülmeden önce kapanır ve doğrulanmış principal ASGI request state üzerinden aktarılır.
+- 2026-07-19 — `list_accessible_accounts` ve local proposal tool'ları principal-bound kısa PostgreSQL
+  unit-of-work kullanır; Google Ads reporting ağ çağrıları açık DB transaction içine alınmaz.
+- 2026-07-19 — Reporting account/credential metadata'sı kısa RLS transaction'ında çözülür; vault read ve
+  Google Ads çağrısı transaction kapandıktan sonra yapılır, AUTH hata pasifleştirmesi ayrı transaction'dır.
+
+- 2026-07-18 — Faz 1.1 kapsam kararı kapatıldı: Directory v1/Faz 1 tool envanteri read-only reporting,
+  local `prepare_proposal` ve proposal read tool'larıyla sınırlıdır; Google Ads execution/apply tool'u
+  Faz 8'e kadar yoktur.
 - 2026-07-17 — Remote directory auth, annotations ve cross-user izolasyon kuralları eklendi.
 - 2026-07-17 — Ürün sahibi onayıyla Kabul edildi durumuna geçirildi; review checklist kanıtları
   submission öncesi `CONNECTOR_SUBMISSION.md` üzerinden ayrıca tamamlanacak.
