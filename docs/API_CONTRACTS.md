@@ -94,6 +94,18 @@ payload kabul etmez; yalnız önceden doğrulanmış proposal ID uygular.
 - Tool çağrısından önce active `(principal_id, customer_id)` ownership ve principal'a ait credential
   yeniden doğrulanır. Kota ve timeout retryable; auth hatası retryable değildir ve hiçbir hata secret döndürmez.
 
+### Ad group performance read sözleşmesi
+
+- Sabit GAQL allowlist'i yalnız `segments.date`, `campaign.id`, `ad_group.id/name/status` ve
+  `metrics.impressions/clicks/cost_micros/conversions` alanlarını `ad_group` kaynağından seçer. Dışarıdan
+  ham GAQL/alan adı kabul edilmez ve ortak doğrulanmış tarih penceresi kullanılır.
+- Campaign read ile aynı tek-sayfa/opaque continuation, integer micros, proto enum adı ve hata/retry
+  davranışını taşır. Eksik `date`/`ad_group_name` string scalar'ları `null`, numeric scalar'lar `0`, enum
+  varsayılanı `UNSPECIFIED` olarak eşlenir; `UNKNOWN` kayıpsız korunur.
+- Active account ownership kapısı seçilen hesabın kaydedilmiş `login_customer_id` değerini credential'a
+  bağlar. Manager üzerinden erişimde bu değer resmî Google Ads client konfigürasyonuna aynen aktarılır;
+  doğrudan erişilen hesapta alan hiç gönderilmez.
+
 ## Öneri şeması — asgari alanlar
 
 ```json
@@ -128,6 +140,10 @@ biri olabilir; `campaign_id` en fazla 19 haneli (`int64`) sayısal bir kimlik ol
 - Public MCP dışında ayrı kullanıcı-facing HTTP API yayınlanıp yayınlanmayacağı.
 
 ## Güncelleme geçmişi
+
+- 2026-07-22 — Ad group performance allowlist/eşleme sözleşmesi campaign standardıyla hizalandı;
+  manager/direct `login_customer_id`, success/empty/multi-page/micros/enum/null/quota/timeout/auth ve
+  ortak principal ownership kapısı contract testleriyle sabitlendi.
 
 - 2026-07-22 — Campaign performance allowlist/eşleme sözleşmesi tamamlandı; v24'te kaldırılmış
   `page_size` RPC parametresi çıkarıldı ve success/empty/multi-page/micros/enum/null/quota/timeout/auth

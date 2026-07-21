@@ -10,6 +10,7 @@ import sys
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -21,6 +22,7 @@ from backend.src.api.reporting import (
     GoogleAdsCredentials,
     GoogleAdsReportingClient,
     _RealSearchService,
+    real_search_service_factory,
 )
 from backend.src.api.retry import RetryPolicy
 from google.ads.googleads.v24.common.types import (
@@ -68,6 +70,21 @@ def _campaign_row(*, campaign_id: int, name: str, clicks: int) -> GoogleAdsRow:
             id=campaign_id,
             name=name,
             status=campaign_status_enum.CampaignStatusEnum.CampaignStatus.ENABLED,
+        ),
+        segments=segments_types.Segments(date="2026-07-01"),
+        metrics=metrics_types.Metrics(
+            impressions=1000, clicks=clicks, cost_micros=250_000, conversions=3.0
+        ),
+    )
+
+
+def _ad_group_row(*, ad_group_id: int, name: str, clicks: int) -> GoogleAdsRow:
+    return GoogleAdsRow(
+        campaign=campaign.Campaign(id=111),
+        ad_group=ad_group.AdGroup(
+            id=ad_group_id,
+            name=name,
+            status=ad_group_status_enum.AdGroupStatusEnum.AdGroupStatus.ENABLED,
         ),
         segments=segments_types.Segments(date="2026-07-01"),
         metrics=metrics_types.Metrics(
@@ -358,24 +375,38 @@ class RealSearchServiceV24ContractTests(unittest.TestCase):
             },
         )
 
+    @patch("backend.src.api.reporting.GoogleAdsClient.load_from_dict")
+    def test_factory_passes_login_customer_id_to_official_client(self, load: Mock) -> None:
+        load.return_value.get_service.return_value = Mock()
+
+        real_search_service_factory(_credentials())
+
+        config = load.call_args.args[0]
+        self.assertEqual(config["login_customer_id"], "1112223333")
+        self.assertEqual(load.call_args.kwargs["version"], "v24")
+
+    @patch("backend.src.api.reporting.GoogleAdsClient.load_from_dict")
+    def test_factory_omits_login_customer_id_for_direct_account(self, load: Mock) -> None:
+        load.return_value.get_service.return_value = Mock()
+        credentials = GoogleAdsCredentials(
+            developer_token="dev-token",
+            client_id="client-id",
+            client_secret="client-secret",
+            refresh_token="refresh-token",
+            login_customer_id=None,
+        )
+
+        real_search_service_factory(credentials)
+
+        self.assertNotIn("login_customer_id", load.call_args.args[0])
+
 
 class GoogleAdsReportingClientAdGroupAndKeywordTests(unittest.TestCase):
     def setUp(self) -> None:
         self.date_range = DateRange(start=date(2026, 7, 1), end=date(2026, 7, 10))
 
     def test_ad_group_performance_maps_narrow_rows(self) -> None:
-        row = GoogleAdsRow(
-            campaign=campaign.Campaign(id=111),
-            ad_group=ad_group.AdGroup(
-                id=222,
-                name="Ana Grup",
-                status=ad_group_status_enum.AdGroupStatusEnum.AdGroupStatus.ENABLED,
-            ),
-            segments=segments_types.Segments(date="2026-07-01"),
-            metrics=metrics_types.Metrics(
-                impressions=10, clicks=2, cost_micros=1000, conversions=0.0
-            ),
-        )
+        row = _ad_group_row(ad_group_id=222, name="Ana Grup", clicks=2)
         service = FakeGoogleAdsSearchService(
             pages_by_token={None: SearchGoogleAdsResponse(results=[row], next_page_token="")}
         )
@@ -387,6 +418,127 @@ class GoogleAdsReportingClientAdGroupAndKeywordTests(unittest.TestCase):
         self.assertEqual(result.rows[0]["ad_group_id"], "222")
         self.assertEqual(result.rows[0]["ad_group_name"], "Ana Grup")
         self.assertEqual(result.rows[0]["ad_group_status"], "ENABLED")
+        self.assertEqual(
+            set(result.rows[0]),
+            {
+                "date",
+                "campaign_id",
+                "ad_group_id",
+                "ad_group_name",
+                "ad_group_status",
+                "impressions",
+                "clicks",
+                "cost_micros",
+                "conversions",
+            },
+        )
+
+    def test_ad_group_empty_page_has_stable_shape(self) -> None:
+        service = FakeGoogleAdsSearchService(
+            pages_by_token={None: SearchGoogleAdsResponse(results=[], next_page_token="")}
+        )
+        client = GoogleAdsReportingClient(search_service_factory=lambda creds: service)
+
+        result = client.get_ad_group_performance(
+            customer_id="1234567890", credentials=_credentials(), date_range=self.date_range
+        )
+
+        self.assertEqual(result.rows, ())
+        self.assertIsNone(result.next_page_token)
+
+    def test_ad_group_pages_are_caller_paced(self) -> None:
+        service = FakeGoogleAdsSearchService(
+            pages_by_token={
+                None: SearchGoogleAdsResponse(
+                    results=[_ad_group_row(ad_group_id=222, name="A", clicks=1)],
+                    next_page_token="page-2",
+                ),
+                "page-2": SearchGoogleAdsResponse(
+                    results=[_ad_group_row(ad_group_id=333, name="B", clicks=2)],
+                    next_page_token="",
+                ),
+            }
+        )
+        client = GoogleAdsReportingClient(search_service_factory=lambda creds: service)
+
+        first = client.get_ad_group_performance(
+            customer_id="1234567890", credentials=_credentials(), date_range=self.date_range
+        )
+        self.assertEqual(len(service.calls), 1)
+        second = client.get_ad_group_performance(
+            customer_id="1234567890",
+            credentials=_credentials(),
+            date_range=self.date_range,
+            page_token=first.next_page_token,
+        )
+
+        self.assertEqual(first.rows[0]["ad_group_id"], "222")
+        self.assertEqual(second.rows[0]["ad_group_id"], "333")
+        self.assertEqual([call["page_token"] for call in service.calls], [None, "page-2"])
+
+    def test_ad_group_preserves_micros_unknown_enum_and_missing_strings(self) -> None:
+        row = GoogleAdsRow(
+            campaign=campaign.Campaign(id=111),
+            ad_group=ad_group.AdGroup(
+                id=222,
+                status=ad_group_status_enum.AdGroupStatusEnum.AdGroupStatus.UNKNOWN,
+            ),
+            metrics=metrics_types.Metrics(cost_micros=9_007_199_254_740_991),
+        )
+        service = FakeGoogleAdsSearchService(
+            pages_by_token={None: SearchGoogleAdsResponse(results=[row])}
+        )
+        client = GoogleAdsReportingClient(search_service_factory=lambda creds: service)
+
+        result = client.get_ad_group_performance(
+            customer_id="1234567890", credentials=_credentials(), date_range=self.date_range
+        )
+
+        mapped = result.rows[0]
+        self.assertEqual(mapped["cost_micros"], 9_007_199_254_740_991)
+        self.assertEqual(mapped["ad_group_status"], "UNKNOWN")
+        self.assertIsNone(mapped["ad_group_name"])
+        self.assertIsNone(mapped["date"])
+
+    def test_ad_group_quota_failure_is_classified(self) -> None:
+        service = FakeGoogleAdsSearchService(raises=core_exceptions.ResourceExhausted("quota"))
+        client = GoogleAdsReportingClient(
+            search_service_factory=lambda creds: service,
+            retry_policy=RetryPolicy(max_attempts=1),
+        )
+
+        with self.assertRaises(AdsApiError) as caught:
+            client.get_ad_group_performance(
+                customer_id="1234567890", credentials=_credentials(), date_range=self.date_range
+            )
+        self.assertEqual(caught.exception.error_class, ErrorClass.RATE_LIMIT)
+
+    def test_ad_group_timeout_failure_is_classified(self) -> None:
+        service = FakeGoogleAdsSearchService(raises=core_exceptions.DeadlineExceeded("timeout"))
+        client = GoogleAdsReportingClient(
+            search_service_factory=lambda creds: service,
+            retry_policy=RetryPolicy(max_attempts=1),
+        )
+
+        with self.assertRaises(AdsApiError) as caught:
+            client.get_ad_group_performance(
+                customer_id="1234567890", credentials=_credentials(), date_range=self.date_range
+            )
+        self.assertEqual(caught.exception.error_class, ErrorClass.TRANSIENT)
+
+    def test_ad_group_auth_failure_is_not_retried(self) -> None:
+        service = FakeGoogleAdsSearchService(raises=core_exceptions.Unauthenticated("revoked"))
+        client = GoogleAdsReportingClient(
+            search_service_factory=lambda creds: service,
+            retry_policy=RetryPolicy(max_attempts=3),
+        )
+
+        with self.assertRaises(AdsApiError) as caught:
+            client.get_ad_group_performance(
+                customer_id="1234567890", credentials=_credentials(), date_range=self.date_range
+            )
+        self.assertEqual(caught.exception.error_class, ErrorClass.AUTH)
+        self.assertEqual(len(service.calls), 1)
 
     def test_keyword_performance_maps_narrow_rows(self) -> None:
         row = GoogleAdsRow(

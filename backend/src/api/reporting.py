@@ -152,10 +152,10 @@ _CAMPAIGN_ROW_GETTERS: dict[str, Callable[[GoogleAdsRow], Any]] = {
 }
 
 _AD_GROUP_ROW_GETTERS: dict[str, Callable[[GoogleAdsRow], Any]] = {
-    "date": lambda row: row.segments.date,
+    "date": lambda row: row.segments.date or None,
     "campaign_id": lambda row: str(row.campaign.id),
     "ad_group_id": lambda row: str(row.ad_group.id),
-    "ad_group_name": lambda row: row.ad_group.name,
+    "ad_group_name": lambda row: row.ad_group.name or None,
     "ad_group_status": lambda row: row.ad_group.status.name,
     "impressions": lambda row: row.metrics.impressions,
     "clicks": lambda row: row.metrics.clicks,

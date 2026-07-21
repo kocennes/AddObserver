@@ -1115,11 +1115,21 @@ Bir madde ancak aşağıdakilerin tamamı sağlandığında işaretlenir:
   kapısında `backend/tests/test_mcp_credentials.py` ile kanıtlanır. Bounded public response/cursor işi
   bağımsız Faz 5.5 maddesinde açık kalır.
 
-- [ ] **5.3 Ad group reporting contract'ını tamamla**
+- [x] **5.3 Ad group reporting contract'ını tamamla**
 
   Prompt: Ad group performance sorgu ve response eşlemesini campaign standardıyla aynı güvenlik,
   pagination, hata ve quota davranışına getir. Raw GAQL kabul etme. Principal/customer ownership ve
   login customer kullanımını contract testleriyle doğrula.
+
+  Tamamlanma kanıtı (2026-07-22): `backend/src/api/queries.py` ad group sorgusunu sabit dokuz alanlık
+  allowlist ve doğrulanmış ortak tarih penceresiyle üretir; raw GAQL yüzeyi yoktur.
+  `backend/src/api/reporting.py` ad group string-null/numeric/enum eşlemesini campaign standardıyla
+  hizalar ve tek sayfa continuation davranışını ortak adapter üzerinden uygular.
+  `backend/tests/test_api_reporting.py` success + exact allowlist, empty page, caller-paced multi-page,
+  exact micros, `UNKNOWN`/null, quota, timeout ve non-retryable auth vakalarını resmî v24 proto/exception
+  tipleriyle doğrular; manager `login_customer_id` değerinin resmî client config'ine aktarıldığını ve
+  direct hesapta gönderilmediğini kanıtlar. Principal/customer cross-ownership reddi ve account'a bağlı
+  login customer çözümlemesi ortak kapıda `backend/tests/test_mcp_credentials.py` ile kapsanır.
 
 - [ ] **5.4 Keyword reporting contract'ını tamamla**
 
