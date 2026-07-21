@@ -43,37 +43,48 @@ def _report_output(row_properties: dict[str, Any]) -> dict[str, Any]:
         {
             "rows": {"type": "array", "items": row},
             "next_page_token": _NULLABLE_STRING,
+            "truncated": {"type": "boolean"},
+            "returned_row_count": _INTEGER,
+            "response_bytes": _INTEGER,
+            "quota": _closed_object({"google_requests": _INTEGER}, ["google_requests"]),
         },
-        ["rows", "next_page_token"],
+        [
+            "rows",
+            "next_page_token",
+            "truncated",
+            "returned_row_count",
+            "response_bytes",
+            "quota",
+        ],
     )
 
 
 CAMPAIGN_REPORT_OUTPUT = _report_output(
     {
-        "date": _STRING,
+        "date": _NULLABLE_STRING,
         "campaign_id": _STRING,
-        "campaign_name": _STRING,
+        "campaign_name": _NULLABLE_STRING,
         "campaign_status": _STRING,
         **_METRICS,
     }
 )
 AD_GROUP_REPORT_OUTPUT = _report_output(
     {
-        "date": _STRING,
+        "date": _NULLABLE_STRING,
         "campaign_id": _STRING,
         "ad_group_id": _STRING,
-        "ad_group_name": _STRING,
+        "ad_group_name": _NULLABLE_STRING,
         "ad_group_status": _STRING,
         **_METRICS,
     }
 )
 KEYWORD_REPORT_OUTPUT = _report_output(
     {
-        "date": _STRING,
+        "date": _NULLABLE_STRING,
         "campaign_id": _STRING,
         "ad_group_id": _STRING,
         "criterion_id": _STRING,
-        "keyword_text": _STRING,
+        "keyword_text": _NULLABLE_STRING,
         "keyword_match_type": _STRING,
         "keyword_status": _STRING,
         **_METRICS,

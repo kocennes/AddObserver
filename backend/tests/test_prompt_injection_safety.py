@@ -279,7 +279,17 @@ class MCPToolInjectionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(result.isError)
         body = json.loads(result.content[0].text)
-        self.assertEqual(set(body.keys()), {"rows", "next_page_token"})
+        self.assertEqual(
+            set(body.keys()),
+            {
+                "rows",
+                "next_page_token",
+                "truncated",
+                "returned_row_count",
+                "response_bytes",
+                "quota",
+            },
+        )
         self.assertEqual(body["rows"][0]["keyword_text"], INJECTION_TEXT)
 
     async def test_prepare_proposal_ignores_scope_claims_embedded_in_rationale(self) -> None:

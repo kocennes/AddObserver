@@ -51,4 +51,8 @@ bir kullanıcının ücretsiz ortak kapasiteyi tüketip diğerlerini aç bırakm
 
 ## Güncelleme geçmişi
 
+- 2026-07-22 — Reporting tool cevapları 100 satır/256 KiB ile sınırlandı. Stateless continuation'ın
+  aynı provider sayfasını yeniden okuyabileceği ve her public çağrının `quota.google_requests=1`
+  metadata'sıyla bu maliyeti görünür kılacağı sözleşmeye bağlandı.
+
 - 2026-07-17 — Çift kapsamlı limiter, fair queue, operation budget eşikleri ve backpressure politikası tanımlandı.

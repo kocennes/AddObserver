@@ -148,6 +148,14 @@ class MCPIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(tool.description)
             self.assertIs(tool.inputSchema.get("additionalProperties"), False)
             self.assertNotIn("principal_id", tool.inputSchema.get("properties", {}))
+            if tool.name.startswith("get_") and tool.name.endswith("_performance"):
+                page_token_schema = tool.inputSchema["properties"]["page_token"]
+                string_schema = next(
+                    candidate
+                    for candidate in page_token_schema["anyOf"]
+                    if candidate.get("type") == "string"
+                )
+                self.assertEqual(string_schema["maxLength"], 2048)
             self.assertIsNotNone(tool.outputSchema)
             self._assert_object_schemas_are_closed(tool.outputSchema)
             self.assertFalse(tool.annotations.destructiveHint)
@@ -228,7 +236,14 @@ class MCPIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"rows": []', campaign_result.content[0].text)
         self.assertEqual(
             campaign_result.structuredContent,
-            {"rows": [], "next_page_token": None},
+            {
+                "rows": [],
+                "next_page_token": None,
+                "truncated": False,
+                "returned_row_count": 0,
+                "response_bytes": campaign_result.structuredContent["response_bytes"],
+                "quota": {"google_requests": 1},
+            },
         )
         self.assertEqual(len(fake_search.calls), 1)
         self.assertEqual(fake_search.calls[0]["customer_id"], "1234567890")

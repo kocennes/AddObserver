@@ -64,6 +64,8 @@ Connector Authorization Server                    ▼
 - `auth`: OAuth 2.1 AS/resource metadata, upstream Google OAuth, connector token ve revoke.
 - `mcp`: Streamable HTTP, tool schemas/annotations, user-bound policy ve minimal sonuç.
 - `api`: principal+customer doğrulanmış Google Ads read adapter; mutate adapter'ı Faz 8'e kadar yoktur.
+- `api/report_cursor`: Google Ads provider sayfasını public MCP response limitlerine bölen stateless,
+  encrypted ve principal/customer/report/date/expiry bağlı continuation sınırı; reklam satırı cache'lemez.
 - `approval`: immutable proposal/hash ve kullanıcı onayı; Google Ads execution state machine'i Faz 8'e kadar yoktur.
 - `db`: principal-scoped SQLite prototip repositories, PostgreSQL/Alembic production schema, RLS
   principal transaction helper'ı ve append-only audit.
@@ -74,6 +76,9 @@ Connector Authorization Server                    ▼
 - Hosting/region, public domain ve Google/Anthropic egress/WAF gereksinimleri.
 
 ## Güncelleme geçmişi
+
+- 2026-07-22 — Reporting trust boundary'ye 100 satır/256 KiB response limiti ve provider token'ı
+  public çıktıdan gizleyen encrypted, context-bound stateless cursor eklendi.
 
 - 2026-07-22 — Connector Google callback PostgreSQL composition'a iki kısa transaction olarak
   bağlandı: ilk transaction authorization state'i okur, ikinci transaction doğrulanmış principal

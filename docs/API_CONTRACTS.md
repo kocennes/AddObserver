@@ -120,6 +120,19 @@ payload kabul etmez; yalnız önceden doğrulanmış proposal ID uygular.
 - Campaign/ad group ile aynı ownership, manager login-customer, caller-paced continuation ve
   quota/timeout/auth hata sözleşmesini kullanır.
 
+### Reporting response limiti ve continuation
+
+- Üç public reporting tool'u cevap başına en fazla 100 satır ve UTF-8 JSON olarak 256 KiB döndürür.
+  `returned_row_count`, gerçek `response_bytes`, `truncated` ve hassas olmayan
+  `quota.google_requests` metadata'sı zorunludur. Tek satır limite sığmazsa veri sessizce atlanmaz;
+  `report_row_too_large` hatası döner.
+- Public `next_page_token`, Google'ın ham token'ı değildir. Provider page token + sayfa-içi row offset,
+  principal/customer/report type/start-end date/issued-at ile birlikte 15 dakikalık authenticated-encrypted
+  cursor içinde taşınır. Başka kapsamda kullanım, oynama ve expiry aynı `invalid_report_cursor` hatasıdır.
+- Bir provider sayfası public limite sığmıyorsa stateless continuation aynı provider sayfasını yeniden
+  okuyup cursor offset'inden devam eder; bu yüzden her tool çağrısı metadata'da bir Google request olarak
+  görünür. Server-side reklam verisi cache'i tutulmaz ve hiçbir satır sessizce kaybedilmez.
+
 ## Öneri şeması — asgari alanlar
 
 ```json
@@ -154,6 +167,9 @@ biri olabilir; `campaign_id` en fazla 19 haneli (`int64`) sayısal bir kimlik ol
 - Public MCP dışında ayrı kullanıcı-facing HTTP API yayınlanıp yayınlanmayacağı.
 
 ## Güncelleme geçmişi
+
+- 2026-07-22 — Faz 5.5: reporting cevapları 100 satır/256 KiB ile sınırlandı; encrypted/context-bound
+  continuation, açık truncation/row/byte metadata'sı ve çağrı başına Google request sayacı eklendi.
 
 - 2026-07-22 — Keyword performance allowlist/eşleme sözleşmesi tamamlandı; match type/status,
   success/empty/multi-page/micros/enum/null/quota/timeout/auth, principal ownership ve injection-benzeri

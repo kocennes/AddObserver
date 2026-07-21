@@ -1147,12 +1147,22 @@ Bir madde ancak aşağıdakilerin tamamı sağlandığında işaretlenir:
   protokolünde yalnız `keyword_text` içinde verbatim/opak veri kaldığını ve çağrı kapsamını değiştirmediğini
   kanıtlar. Cross-principal ownership ve manager login-customer ortak credential kapısı/testleriyle korunur.
 
-- [ ] **5.5 Reporting pagination ve response limitlerini uygula**
+- [x] **5.5 Reporting pagination ve response limitlerini uygula**
 
   Prompt: Büyük Google Ads sonuçlarını bounded sayfa/row/byte limitleriyle işle. MCP/HTTP response'unu
   aşırı büyütme; güvenli continuation/cursor veya açık truncation metadata'sı kullan. Cursor principal,
   customer, query ve expiry bağlamına bağlı olsun. Quota tüketimini görünür ama hassas olmayan metadata
   ile raporla.
+
+  Tamamlanma kanıtı (2026-07-22): `backend/src/api/report_cursor.py` public reporting cevabını 100 satır
+  ve 256 KiB UTF-8 JSON ile sınırlar; satır kaybetmeden page-içi offset continuation üretir ve tek aşırı
+  büyük satırı güvenli hatayla reddeder. Google provider token + row offset, vault key'den ayrı etiketle
+  türetilen Fernet anahtarıyla şifrelenir; cursor 15 dakika ve tam principal/customer/report type/tarih
+  bağlamına bağlıdır. `backend/src/mcp/tools.py` yalnız bu cursor'u kabul eder; çıktı `truncated`,
+  `returned_row_count`, exact `response_bytes` ve `quota.google_requests` taşır.
+  `backend/tests/test_api_report_cursor.py` row/byte sınırı, provider-page geçişi, no-data-loss,
+  oversized-row, encryption, tam context isolation, tamper/expiry/future/oversize reddini kapsar;
+  MCP integration/output-schema ve injection regresyonları yeni kapalı response şekliyle geçer.
 
 - [ ] **5.6 Google Ads hata sınıflandırmasını tamamla**
 

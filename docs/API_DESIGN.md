@@ -85,9 +85,11 @@ kullanılır:
   varsa response'a eklenir; `cursor` query parametresi verilirse bir önceki sayfanın konumundan
   devam eder. `backend/src/db/proposals.py::ProposalRepository.list_pending` `limit+1` satır çekip
   keyset `WHERE (created_at, id) > (?, ?)` ile devam eder -- asla `OFFSET` kullanmaz.
-- Google Ads reporting tool'ları (`api/reporting.py`) zaten Google'ın kendi opak `page_token`'ını
-  kullanıyor (offset değil); bu, aynı "asla offset yok" ilkesini kod değişikliği gerekmeden zaten
-  karşılıyor -- yalnız bu belgeye çapraz referanslandı.
+- Google Ads reporting tool'ları provider `page_token`'ını public yüzeye doğrudan çıkarmaz.
+  `api/report_cursor.py` provider token + sayfa-içi satır konumunu authenticated encryption ile
+  saklayan, 15 dakikalık cursor üretir. Anahtar vault key'inden ayrı `addobserver-google-report-cursor-v1`
+  etiketiyle türetilir; cursor principal, customer, report türü ve tam tarih aralığına bağlıdır.
+  Bütün signature/decrypt/expiry/context hataları aynı `invalid_report_cursor` sonucunu verir.
 
 ## Açık sorular
 
@@ -97,6 +99,9 @@ kullanılır:
 - İlk desteklenecek live mutate execution allowlist'i Faz 8 Google Compliance/RMF kararına bağlıdır.
 
 ## Güncelleme geçmişi
+
+- 2026-07-22 — Faz 5.5 reporting cursor'u provider token + row offset'i şifreli ve principal/customer/
+  report/date/expiry bağlı taşıyacak şekilde tanımlandı; public response 100 satır/256 KiB ile sınırlandı.
 
 - 2026-07-18 — Faz 1.1 kapsam kararı kapatıldı: mevcut API/MCP yüzeyi Directory v1 için reporting + local
   proposal hazırlama olarak kalır; live Google Ads execution/tool tasarımı Faz 8'e ertelendi.

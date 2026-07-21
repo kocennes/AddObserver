@@ -65,3 +65,19 @@ def set_output_schema(mcp: FastMCP, tool_name: str, schema: dict[str, object]) -
     if tool.fn_metadata.output_model is None:
         raise RuntimeError(f"Tool {tool_name!r} structured output etkin degil")
     tool.fn_metadata.output_schema = schema
+
+
+def set_input_string_max_length(
+    mcp: FastMCP, tool_name: str, field_name: str, max_length: int
+) -> None:
+    """Add a startup-time maxLength constraint to an inferred string/nullable-string field."""
+    tool = mcp._tool_manager.get_tool(tool_name)  # noqa: SLF001
+    assert tool is not None, f"Tool {tool_name!r} kayitli degil."  # nosec B101
+    field = tool.parameters.get("properties", {}).get(field_name)
+    assert isinstance(field, dict), f"{tool_name}.{field_name} schema alani bulunamadi"  # nosec B101
+    candidates = field.get("anyOf", [field])
+    for candidate in candidates:
+        if isinstance(candidate, dict) and candidate.get("type") == "string":
+            candidate["maxLength"] = max_length
+            return
+    raise RuntimeError(f"{tool_name}.{field_name} string schema degil")

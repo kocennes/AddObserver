@@ -87,6 +87,10 @@ metadata'sını taşır. Input ve iç içe tüm output object şemaları `additi
 
 ## Güncelleme geçmişi
 
+- 2026-07-22 — Üç reporting tool output'u bounded `rows`, encrypted `next_page_token`, `truncated`,
+  `returned_row_count`, `response_bytes` ve `quota.google_requests` alanlarıyla genişletildi; provider
+  token public MCP çıktısından kaldırıldı.
+
 - 2026-07-19 — Tool envanteri contract testi ad/title/description, 64 karakter sınırı, principal argümanı
   yokluğu, read/write annotation ayrımı ve iç içe kapalı input/output schema sözleşmesini gerçek MCP
   `tools/list` cevabında doğrular. Yedi tool structured output ve explicit allowlist schema yayımlar.

@@ -13,13 +13,19 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
 from ..api.errors import AdsApiError, ErrorClass
 from ..api.queries import DateRange
+from ..api.report_cursor import (
+    ReportCursorPosition,
+    bound_report_page,
+    decode_report_cursor,
+    encode_report_cursor,
+)
 from ..api.reporting import GoogleAdsCredentials, GoogleAdsReportingClient, ReportPage
 from ..auth.vault import VaultClient
 from ..config import Settings
@@ -37,6 +43,7 @@ from .tool_support import (
     READ_ONLY_LOCAL,
     authenticated_principal_id,
     close_input_schema,
+    set_input_string_max_length,
     set_output_schema,
 )
 
@@ -104,19 +111,36 @@ def _fetch_report_page(
     end_date: str,
     page_token: str | None,
     *,
+    report_type: str,
     fetch: Callable[..., ReportPage],
 ) -> dict[str, Any]:
     """Shared body for every reporting tool: resolve credentials, call ``fetch``, and
     react to an AUTH-class failure by deactivating the credential (ERROR_HANDLING.md
     'Auth' row, todo.md 3.6) before letting the error propagate as a tool error."""
     principal_id = authenticated_principal_id(ctx)
+    date_range = _parse_date_range(start_date, end_date)
+    vault_key = context.settings.local_vault_key
+    if not vault_key:
+        raise RuntimeError("Rapor cursor imza anahtari yapilandirilmadi")
+    position = ReportCursorPosition(provider_page_token=None, row_offset=0)
+    if page_token is not None:
+        position = decode_report_cursor(
+            vault_key,
+            page_token,
+            principal_id=principal_id,
+            customer_id=customer_id,
+            report_type=report_type,
+            start_date=date_range.start,
+            end_date=date_range.end,
+            now=datetime.now(UTC),
+        )
     credentials = _resolve_credentials(context, ctx, customer_id)
     try:
         page = fetch(
             customer_id=customer_id,
             credentials=credentials,
-            date_range=_parse_date_range(start_date, end_date),
-            page_token=page_token,
+            date_range=date_range,
+            page_token=position.provider_page_token,
         )
     except AdsApiError as error:
         if context.postgres_uow_factory is None:
@@ -138,7 +162,25 @@ def _fetch_report_page(
                     oauth_credentials=work.repositories.credentials,
                 )
         raise
-    return {"rows": list(page.rows), "next_page_token": page.next_page_token}
+
+    def _mint_cursor(provider_page_token: str | None, row_offset: int) -> str:
+        return encode_report_cursor(
+            vault_key,
+            principal_id=principal_id,
+            customer_id=customer_id,
+            report_type=report_type,
+            start_date=date_range.start,
+            end_date=date_range.end,
+            position=ReportCursorPosition(provider_page_token, row_offset),
+            now=datetime.now(UTC),
+        )
+
+    return bound_report_page(
+        page,
+        provider_page_token=position.provider_page_token,
+        row_offset=position.row_offset,
+        mint_cursor=_mint_cursor,
+    )
 
 
 def register_reporting_tools(mcp: FastMCP, context: MCPToolContext) -> None:
@@ -185,6 +227,7 @@ def register_reporting_tools(mcp: FastMCP, context: MCPToolContext) -> None:
             start_date,
             end_date,
             page_token,
+            report_type="campaign",
             fetch=context.reporting_client.get_campaign_performance,
         )
 
@@ -204,6 +247,7 @@ def register_reporting_tools(mcp: FastMCP, context: MCPToolContext) -> None:
             start_date,
             end_date,
             page_token,
+            report_type="ad_group",
             fetch=context.reporting_client.get_ad_group_performance,
         )
 
@@ -225,6 +269,7 @@ def register_reporting_tools(mcp: FastMCP, context: MCPToolContext) -> None:
             start_date,
             end_date,
             page_token,
+            report_type="keyword",
             fetch=context.reporting_client.get_keyword_performance,
         )
 
@@ -235,4 +280,6 @@ def register_reporting_tools(mcp: FastMCP, context: MCPToolContext) -> None:
         "get_keyword_performance",
     ):
         close_input_schema(mcp, tool_name)
+        if tool_name != "list_accessible_accounts":
+            set_input_string_max_length(mcp, tool_name, "page_token", 2048)
         set_output_schema(mcp, tool_name, TOOL_OUTPUT_SCHEMAS[tool_name])
