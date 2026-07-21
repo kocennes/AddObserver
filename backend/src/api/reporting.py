@@ -95,11 +95,15 @@ class _RealSearchService:
     def search(
         self, *, customer_id: str, query: str, page_token: str | None, page_size: int
     ) -> SearchGoogleAdsResponse:
+        # Google Ads API v19+ fixes Search page size at 10,000 and rejects a
+        # caller-supplied ``page_size`` with PAGE_SIZE_NOT_SUPPORTED. Keep the
+        # argument on our boundary for input compatibility/budget validation,
+        # but do not forward it to the v24 RPC.
+        del page_size
         pager = self._ga_service.search(
             customer_id=customer_id,
             query=query,
             page_token=page_token or "",
-            page_size=page_size,
         )
         return next(pager.pages)
 
@@ -133,9 +137,13 @@ def _row_to_mapping(
 
 
 _CAMPAIGN_ROW_GETTERS: dict[str, Callable[[GoogleAdsRow], Any]] = {
-    "date": lambda row: row.segments.date,
+    # Proto scalar fields have no presence in this response shape. Normalize
+    # their default empty strings to JSON null so consumers can distinguish
+    # missing provider data from a genuine value. Numeric defaults remain
+    # zero and enum defaults remain UNSPECIFIED, matching the official proto.
+    "date": lambda row: row.segments.date or None,
     "campaign_id": lambda row: str(row.campaign.id),
-    "campaign_name": lambda row: row.campaign.name,
+    "campaign_name": lambda row: row.campaign.name or None,
     "campaign_status": lambda row: row.campaign.status.name,
     "impressions": lambda row: row.metrics.impressions,
     "clicks": lambda row: row.metrics.clicks,

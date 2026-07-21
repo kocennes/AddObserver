@@ -20,6 +20,7 @@ from backend.src.api.reporting import (
     FakeGoogleAdsSearchService,
     GoogleAdsCredentials,
     GoogleAdsReportingClient,
+    _RealSearchService,
 )
 from backend.src.api.retry import RetryPolicy
 from google.ads.googleads.v24.common.types import (
@@ -126,6 +127,72 @@ class GoogleAdsReportingClientCampaignTests(unittest.TestCase):
         )
         self.assertEqual(result.next_page_token, "page-2")
 
+    def test_empty_page_has_stable_shape(self) -> None:
+        service = FakeGoogleAdsSearchService(
+            pages_by_token={None: SearchGoogleAdsResponse(results=[], next_page_token="")}
+        )
+        client = GoogleAdsReportingClient(search_service_factory=lambda creds: service)
+
+        result = client.get_campaign_performance(
+            customer_id="1234567890", credentials=_credentials(), date_range=self.date_range
+        )
+
+        self.assertEqual(result.rows, ())
+        self.assertIsNone(result.next_page_token)
+
+    def test_pages_are_fetched_only_when_the_caller_supplies_continuation(self) -> None:
+        service = FakeGoogleAdsSearchService(
+            pages_by_token={
+                None: SearchGoogleAdsResponse(
+                    results=[_campaign_row(campaign_id=111, name="A", clicks=1)],
+                    next_page_token="page-2",
+                ),
+                "page-2": SearchGoogleAdsResponse(
+                    results=[_campaign_row(campaign_id=222, name="B", clicks=2)],
+                    next_page_token="",
+                ),
+            }
+        )
+        client = GoogleAdsReportingClient(search_service_factory=lambda creds: service)
+
+        first = client.get_campaign_performance(
+            customer_id="1234567890", credentials=_credentials(), date_range=self.date_range
+        )
+        self.assertEqual(len(service.calls), 1)
+        second = client.get_campaign_performance(
+            customer_id="1234567890",
+            credentials=_credentials(),
+            date_range=self.date_range,
+            page_token=first.next_page_token,
+        )
+
+        self.assertEqual([row["campaign_id"] for row in first.rows], ["111"])
+        self.assertEqual([row["campaign_id"] for row in second.rows], ["222"])
+        self.assertEqual([call["page_token"] for call in service.calls], [None, "page-2"])
+
+    def test_preserves_micros_enum_unknown_and_normalizes_missing_strings(self) -> None:
+        row = GoogleAdsRow(
+            campaign=campaign.Campaign(
+                id=111,
+                status=campaign_status_enum.CampaignStatusEnum.CampaignStatus.UNKNOWN,
+            ),
+            metrics=metrics_types.Metrics(cost_micros=9_007_199_254_740_991),
+        )
+        service = FakeGoogleAdsSearchService(
+            pages_by_token={None: SearchGoogleAdsResponse(results=[row])}
+        )
+        client = GoogleAdsReportingClient(search_service_factory=lambda creds: service)
+
+        result = client.get_campaign_performance(
+            customer_id="1234567890", credentials=_credentials(), date_range=self.date_range
+        )
+
+        mapped = result.rows[0]
+        self.assertEqual(mapped["cost_micros"], 9_007_199_254_740_991)
+        self.assertEqual(mapped["campaign_status"], "UNKNOWN")
+        self.assertIsNone(mapped["campaign_name"])
+        self.assertIsNone(mapped["date"])
+
     def test_requests_the_exact_page_token_it_was_given(self) -> None:
         page = SearchGoogleAdsResponse(results=[], next_page_token="")
         service = FakeGoogleAdsSearchService(pages_by_token={"page-2": page})
@@ -192,6 +259,49 @@ class GoogleAdsReportingClientCampaignTests(unittest.TestCase):
         self.assertNotIn("refresh-token", str(ctx.exception))
         self.assertNotIn("client-secret", str(ctx.exception))
 
+    def test_quota_failure_is_classified_after_retry_budget_is_exhausted(self) -> None:
+        service = FakeGoogleAdsSearchService(raises=core_exceptions.ResourceExhausted("quota"))
+        client = GoogleAdsReportingClient(
+            search_service_factory=lambda creds: service,
+            retry_policy=RetryPolicy(max_attempts=1),
+        )
+
+        with self.assertRaises(AdsApiError) as ctx:
+            client.get_campaign_performance(
+                customer_id="1234567890", credentials=_credentials(), date_range=self.date_range
+            )
+        self.assertEqual(ctx.exception.error_class, ErrorClass.RATE_LIMIT)
+        self.assertEqual(ctx.exception.code, "transport.resource_exhausted")
+
+    def test_timeout_is_classified_after_retry_budget_is_exhausted(self) -> None:
+        service = FakeGoogleAdsSearchService(raises=core_exceptions.DeadlineExceeded("timeout"))
+        client = GoogleAdsReportingClient(
+            search_service_factory=lambda creds: service,
+            retry_policy=RetryPolicy(max_attempts=1),
+        )
+
+        with self.assertRaises(AdsApiError) as ctx:
+            client.get_campaign_performance(
+                customer_id="1234567890", credentials=_credentials(), date_range=self.date_range
+            )
+        self.assertEqual(ctx.exception.error_class, ErrorClass.TRANSIENT)
+        self.assertEqual(ctx.exception.code, "transport.unavailable")
+
+    def test_search_auth_failure_is_not_retried(self) -> None:
+        service = FakeGoogleAdsSearchService(raises=core_exceptions.Unauthenticated("revoked"))
+        client = GoogleAdsReportingClient(
+            search_service_factory=lambda creds: service,
+            retry_policy=RetryPolicy(max_attempts=3),
+        )
+
+        with self.assertRaises(AdsApiError) as ctx:
+            client.get_campaign_performance(
+                customer_id="1234567890", credentials=_credentials(), date_range=self.date_range
+            )
+        self.assertEqual(ctx.exception.error_class, ErrorClass.AUTH)
+        self.assertFalse(ctx.exception.retryable)
+        self.assertEqual(len(service.calls), 1)
+
     def test_credential_refresh_failure_during_service_construction_is_classified(self) -> None:
         """The official client refreshes the OAuth token while *building* the
         service (a real network call), not on the first search -- a revoked
@@ -210,6 +320,43 @@ class GoogleAdsReportingClientCampaignTests(unittest.TestCase):
             )
         self.assertEqual(ctx.exception.error_class, ErrorClass.AUTH)
         self.assertFalse(ctx.exception.retryable)
+
+
+class RealSearchServiceV24ContractTests(unittest.TestCase):
+    def test_does_not_send_removed_page_size_parameter(self) -> None:
+        response = SearchGoogleAdsResponse()
+
+        class _Pager:
+            pages = iter((response,))
+
+        class _GoogleAdsService:
+            def __init__(self) -> None:
+                self.kwargs = None
+
+            def search(self, **kwargs):
+                self.kwargs = kwargs
+                return _Pager()
+
+        ga_service = _GoogleAdsService()
+        service = _RealSearchService(ga_service)
+
+        self.assertIs(
+            service.search(
+                customer_id="1234567890",
+                query="SELECT campaign.id FROM campaign",
+                page_token=None,
+                page_size=100,
+            ),
+            response,
+        )
+        self.assertEqual(
+            ga_service.kwargs,
+            {
+                "customer_id": "1234567890",
+                "query": "SELECT campaign.id FROM campaign",
+                "page_token": "",
+            },
+        )
 
 
 class GoogleAdsReportingClientAdGroupAndKeywordTests(unittest.TestCase):

@@ -79,6 +79,21 @@ payload kabul etmez; yalnız önceden doğrulanmış proposal ID uygular.
   token/secret girmez. Senkronizasyon yalnız aynı principal namespace'inde `link_account` çağırır;
   daha önce disconnect edilmiş aynı customer satırını kimliğini değiştirmeden yeniden active yapar.
 
+### Campaign performance read sözleşmesi
+
+- Sabit GAQL allowlist'i yalnız `segments.date`, `campaign.id/name/status` ve
+  `metrics.impressions/clicks/cost_micros/conversions` alanlarını seçer; dışarıdan ham GAQL veya alan adı
+  kabul edilmez. Tarih aralığı iki uç dahil en fazla 90 gündür.
+- ID JSON'da string, `cost_micros` kayıpsız integer, conversions sayı, enum resmi proto adı olarak taşınır;
+  gelecekte gelen `UNKNOWN` değeri korunur. Provider'ın bulunmayan string scalar varsayılanları (`date`,
+  `campaign_name`) `null`; numeric varsayılanları `0`, enum varsayılanı `UNSPECIFIED` olarak eşlenir.
+- Her çağrı tek provider sayfası döndürür ve devamı varsa opaque `next_page_token` verir; istemci token
+  verilmeden sonraki sayfayı çekmez. Google Ads v24 `Search` sabit 10.000 satır sayfası kullandığı ve
+  `page_size` gönderimini `PAGE_SIZE_NOT_SUPPORTED` ile reddettiği için RPC'ye `page_size` iletilmez.
+  Uygulama-seviyesi row/byte sınırı ve principal/customer/query bağlı cursor Faz 5.5 kapsamındadır.
+- Tool çağrısından önce active `(principal_id, customer_id)` ownership ve principal'a ait credential
+  yeniden doğrulanır. Kota ve timeout retryable; auth hatası retryable değildir ve hiçbir hata secret döndürmez.
+
 ## Öneri şeması — asgari alanlar
 
 ```json
@@ -113,6 +128,11 @@ biri olabilir; `campaign_id` en fazla 19 haneli (`int64`) sayısal bir kimlik ol
 - Public MCP dışında ayrı kullanıcı-facing HTTP API yayınlanıp yayınlanmayacağı.
 
 ## Güncelleme geçmişi
+
+- 2026-07-22 — Campaign performance allowlist/eşleme sözleşmesi tamamlandı; v24'te kaldırılmış
+  `page_size` RPC parametresi çıkarıldı ve success/empty/multi-page/micros/enum/null/quota/timeout/auth
+  resmi response/exception contract testleriyle sabitlendi. Ownership mevcut principal-scoped credential
+  contract testleriyle birlikte doğrulandı.
 
 - 2026-07-22 — Faz 5.1 accessible-account adapter'ı eklendi: doğrudan customer listesi, manager
   `customer_client` hiyerarşisi, `login_customer_id` eşlemesi, ID doğrulama/deduplikasyon ve

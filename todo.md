@@ -1098,12 +1098,22 @@ Bir madde ancak aşağıdakilerin tamamı sağlandığında işaretlenir:
   sunulmalı ve yalnız seçilen ID'ler connector callback/onboarding akışından bu senkronizasyon
   primitive'ine verilmelidir; otomatik tüm-hesap bağlama yapılmaz.
 
-- [ ] **5.2 Campaign reporting contract'ını tamamla**
+- [x] **5.2 Campaign reporting contract'ını tamamla**
 
   Prompt: Campaign performance alan allowlist'ini ürün/RMF sözleşmesiyle karşılaştır. GAQL'i yalnız
   kod allowlist'lerinden oluştur; tarih penceresi, pagination, micros, enum ve null eşlemelerini resmi
   response type mock'larıyla test et. Başarı, empty page, multi-page, quota, timeout, auth ve ownership
   vakalarını kapsa.
+
+  Tamamlanma kanıtı (2026-07-22): `backend/src/api/queries.py` campaign sorgusunu sabit sekiz alanlık
+  allowlist ve en fazla 90 günlük doğrulanmış tarih penceresiyle üretir; raw GAQL kabul edilmez.
+  `backend/src/api/reporting.py` v24'ün reddettiği `page_size` parametresini provider RPC'sine artık
+  göndermez, tek sayfa/continuation davranışını korur ve eksik string scalar'ları `null`, numeric
+  scalar'ları `0`, enum adlarını (`UNKNOWN` dahil) kayıpsız eşler. `backend/tests/test_api_reporting.py`
+  success, empty page, caller-paced multi-page, exact micros, enum/null, quota, timeout ve auth vakalarını
+  resmi v24 proto/Google exception tipleriyle kapsar. Ownership/cross-principal reddi ortak credential
+  kapısında `backend/tests/test_mcp_credentials.py` ile kanıtlanır. Bounded public response/cursor işi
+  bağımsız Faz 5.5 maddesinde açık kalır.
 
 - [ ] **5.3 Ad group reporting contract'ını tamamla**
 
