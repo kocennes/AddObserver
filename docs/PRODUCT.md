@@ -27,6 +27,8 @@ herkese açık bir Connectors Directory ürünü sağlamak.
 - Kullanıcının erişebildiği customer account'ları listeleme/seçme.
 - Account/campaign/ad group/keyword performansını dar, sayfalı ve tarih aralıklı okuma tool'ları.
 - Kaynak metriklere dayalı yapılandırılmış öneri hazırlama; önerinin AI çıktısı olduğunun açık olması.
+- `prepare_proposal` yalnız connector DB'sinde yerel, bekleyen onay kaydı oluşturur; Google Ads'e mutate
+  çağrısı yapan execution/apply tool'u Directory v1/Faz 1 kapsamında yoktur.
 - En az üç belgelenmiş örnek prompt, actionable hata ve quota/backpressure görünürlüğü.
 - Ücret, abonelik, ödeme ve reklam/sponsorlu içerik yoktur.
 
@@ -56,12 +58,16 @@ immutable approval/freshness kapısından geçer. Yeni campaign oluşturma sonra
 ## Açık sorular
 
 - Public ürün adı/domain/support ve işletmeci kimliği.
-- Faz 1'in reporting-only kalıp kalmayacağı; write'ın RMF sınıflandırmasından sonra açılması önerilir.
 - Ücretsiz hizmetin abuse/kota için kullanıcı limiti ve fair-use politikası.
-- Kullanıcıya ayrı web dashboard gerekip gerekmediği veya tüm deneyimin Claude içinde kalması.
 
 ## Güncelleme geçmişi
 
+- 2026-07-18 — Faz 1.1 kapsam kararı kapatıldı: Directory v1/Faz 1 reporting + local proposal olarak
+  kalır; Google Ads'e gerçek mutate yapan execution/apply tool'u Google Compliance/RMF sınıflandırması ve
+  Anthropic reviewer UX'i doğrulanana kadar Faz 8 altında bloke kalır.
+- 2026-07-18 — Faz 1.3: "Kullanıcıya ayrı web dashboard gerekip gerekmediği" sorusu kapatıldı --
+  Faz 1'de tüm deneyim Claude içinde ve mevcut minimal `/approvals` sayfasında kalır, ayrı bir
+  dashboard eklenmez (bkz. `docs/DESIGN.md` "Güncelleme geçmişi").
 - 2026-07-17 — İç ajans aracı kapsamı public, self-service, ücretsiz directory connector olarak değiştirildi.
 - 2026-07-17 — Ürün sahibi onayıyla Kabul edildi durumuna geçirildi.
 

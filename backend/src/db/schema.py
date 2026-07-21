@@ -131,6 +131,7 @@ SCHEMA_STATEMENTS = [
         resource TEXT NOT NULL,
         scope TEXT NOT NULL,
         client_state TEXT NOT NULL,
+        consent_csrf_hash TEXT NOT NULL,
         status TEXT NOT NULL,
         expires_at TEXT NOT NULL,
         created_at TEXT NOT NULL
@@ -198,7 +199,7 @@ SCHEMA_STATEMENTS = [
     CREATE TABLE IF NOT EXISTS web_session (
         token_hash TEXT PRIMARY KEY,
         principal_id TEXT NOT NULL REFERENCES principal(id),
-        csrf_token TEXT NOT NULL,
+        csrf_token_hash TEXT NOT NULL,
         expires_at TEXT NOT NULL,
         revoked_at TEXT,
         created_at TEXT NOT NULL

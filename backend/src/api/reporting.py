@@ -12,8 +12,9 @@ adapter's, so an adapter bug can never cross principal boundaries
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Mapping, Protocol
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field
+from typing import Any, Protocol
 
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
@@ -46,13 +47,16 @@ class GoogleAdsCredentials:
 
     ``refresh_token`` must never be logged, cached beyond this call's scope,
     or returned to any MCP/Claude-facing response (docs/SECURITY.md --
-    "Access token kaliciliastirilmaz").
+    "Access token kaliciliastirilmaz"). ``developer_token``/``client_secret``/
+    ``refresh_token`` carry ``repr=False`` so an accidental ``repr()``/``str()``
+    of this object (log line, exception message, debugger) never prints the
+    raw secret (backend/tests/test_secret_redaction.py).
     """
 
-    developer_token: str
+    developer_token: str = field(repr=False)
     client_id: str
-    client_secret: str
-    refresh_token: str
+    client_secret: str = field(repr=False)
+    refresh_token: str = field(repr=False)
     login_customer_id: str | None = None
 
 
@@ -120,7 +124,11 @@ def real_search_service_factory(credentials: GoogleAdsCredentials) -> GoogleAdsS
     return _RealSearchService(client.get_service("GoogleAdsService"))
 
 
-def _row_to_mapping(field_names: Iterable[str], getters: Mapping[str, Callable[[GoogleAdsRow], Any]], row: GoogleAdsRow) -> Mapping[str, Any]:
+def _row_to_mapping(
+    field_names: Iterable[str],
+    getters: Mapping[str, Callable[[GoogleAdsRow], Any]],
+    row: GoogleAdsRow,
+) -> Mapping[str, Any]:
     return {name: getters[name](row) for name in field_names}
 
 
@@ -307,7 +315,12 @@ class FakeGoogleAdsSearchService:
         self, *, customer_id: str, query: str, page_token: str | None, page_size: int
     ) -> SearchGoogleAdsResponse:
         self.calls.append(
-            {"customer_id": customer_id, "query": query, "page_token": page_token, "page_size": page_size}
+            {
+                "customer_id": customer_id,
+                "query": query,
+                "page_token": page_token,
+                "page_size": page_size,
+            }
         )
         if len(self.calls) <= self._fail_first_n_calls and self._raises is not None:
             raise self._raises

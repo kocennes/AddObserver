@@ -122,8 +122,10 @@ _KEYWORD_FIELDS = (
 
 def _build_query(*, fields: tuple[str, ...], resource: str, date_range: DateRange) -> str:
     select_clause = ", ".join(fields)
+    # GAQL, not SQL; `fields`/`resource` are always code-only allowlist constants (see
+    # _CAMPAIGN_FIELDS/_AD_GROUP_FIELDS/_KEYWORD_FIELDS above), never external input.
     return (
-        f"SELECT {select_clause} FROM {resource} "
+        f"SELECT {select_clause} FROM {resource} "  # nosec B608
         f"WHERE {date_range.as_gaql_between()} "
         f"ORDER BY segments.date ASC"
     )

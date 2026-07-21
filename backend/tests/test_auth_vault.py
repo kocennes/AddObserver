@@ -9,10 +9,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from cryptography.fernet import Fernet
-
 from backend.src.auth.vault import LocalEncryptedVault, VaultError
 from backend.src.db.connection import connect
+from cryptography.fernet import Fernet
 
 
 class LocalEncryptedVaultTests(unittest.TestCase):

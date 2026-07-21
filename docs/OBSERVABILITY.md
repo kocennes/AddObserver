@@ -35,6 +35,9 @@ Tümünde UTC, `service.name/version/environment`, correlation ID vardır. Trace
 actor/service/principal, customer, event type, proposal/approval/execution, before/after özeti/hash'i, outcome,
 reason, Google request ID ve zaman taşır.
 
+- Public HTTP sınırında her response `X-Correlation-ID` taşır. Gelen güvenli değerler korunur; geçersiz veya
+  yüksek riskli değerler log/header'a yansıtılmadan yeni opaque ID ile değiştirilir. Problem response gövdesindeki
+  `correlation_id`, response header'ıyla aynı değerdir.
 - Baggage yalnız allowlist teknik değerler taşır; token, email, reklam metni, customer ID veya principal ID
   üçüncü taraf Google/Anthropic isteklerine propagate edilmez. Dış trace context sınırda sanitize edilir.
 - Metrik label'larında user/principal, proposal, execution, raw customer ID, URL veya request ID yoktur. Kullanıcı bazlı
@@ -42,7 +45,9 @@ reason, Google request ID ve zaman taşır.
 - HTTP body, prompt, Google payload varsayılan loglanmaz. Authorization/cookie/token/secret/redacted alanlar
   logger ve collector katmanında allowlist+redaction ile korunur.
 - Audit write mutate ön koşuludur ve fail-closed'dur. Normal runtime rolü audit UPDATE/DELETE yapamaz;
-  export/okuma da audit edilir. Audit event'leri correlation ile Google sonucu uzlaştırır.
+  export/okuma da audit edilir. HTTP'den gelen approval decision ve disconnect gibi state-changing audit
+  event'leri, güvenli client correlation ID kabul edildiyse response header'ıyla aynı correlation ID'yi
+  taşır. Audit event'leri correlation ile Google sonucu uzlaştırır.
 - Asgari metrikler: request rate/error/duration, queue depth/age, analysis latency/schema failure, approval age,
   execution outcome/unknown, Google error class/quota, credential invalid, audit failure ve principal mismatch.
 - Alarm: onaysız mutate denemesi, cross-user mismatch, audit failure ve unknown execution anlık yüksek önem;
@@ -59,3 +64,4 @@ reason, Google request ID ve zaman taşır.
 ## Güncelleme geçmişi
 
 - 2026-07-17 — OTel sinyalleri, düşük kardinalite, redaction ve ayrı fail-closed audit hattı tanımlandı.
+- 2026-07-17 — Public HTTP `X-Correlation-ID` üretme/echo etme ve problem response korelasyonu eklendi.

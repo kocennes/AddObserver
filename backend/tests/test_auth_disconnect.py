@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from cryptography.fernet import Fernet
-
 from backend.src.auth.disconnect import disconnect_principal
 from backend.src.auth.domain import (
+    AuthorizationTransaction,
     ClientIdentity,
     compute_code_challenge,
     consent_transaction,
@@ -21,7 +20,6 @@ from backend.src.auth.domain import (
     issue_authorization_code,
     issue_token_pair,
 )
-from backend.src.auth.domain import AuthorizationTransaction
 from backend.src.auth.vault import LocalEncryptedVault, VaultError
 from backend.src.db.connection import connect
 from backend.src.db.oauth_store import (
@@ -30,9 +28,15 @@ from backend.src.db.oauth_store import (
     TokenRepository,
 )
 from backend.src.db.proposals import AuditRepository
-from backend.src.db.repository import AdsAccountRepository, OAuthCredentialRepository, PrincipalRepository
+from backend.src.db.repository import (
+    AdsAccountRepository,
+    OAuthCredentialRepository,
+    PrincipalRepository,
+)
+from backend.src.db.web_session_store import WebSessionRepository
+from cryptography.fernet import Fernet
 
-NOW = datetime(2026, 7, 17, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 17, 12, 0, 0, tzinfo=UTC)
 MCP_RESOURCE = "https://mcp.example.com/mcp"
 CLIENT = ClientIdentity(
     client_id="https://claude.ai/oauth/hosted-client-metadata",
@@ -49,6 +53,7 @@ class DisconnectPrincipalTests(unittest.TestCase):
         self.credentials = OAuthCredentialRepository(self.conn)
         self.tokens = TokenRepository(self.conn)
         self.audit = AuditRepository(self.conn)
+        self.web_sessions = WebSessionRepository(self.conn)
         self.vault = LocalEncryptedVault(self.conn, Fernet.generate_key())
         self.principal = self.principals.get_or_create("https://accounts.google.com", "sub-1")
 
@@ -64,6 +69,7 @@ class DisconnectPrincipalTests(unittest.TestCase):
             expected_resource=MCP_RESOURCE,
             scope="adwords",
             client_state="client-state",
+            consent_csrf_hash="test-consent-csrf-hash",
             now=NOW,
         )
         transactions = AuthorizationTransactionRepository(self.conn)
@@ -139,6 +145,37 @@ class DisconnectPrincipalTests(unittest.TestCase):
         self.assertEqual(events[0].event_type, "principal.disconnected")
         self.assertEqual(events[0].outcome, "revoked")
 
+    def test_disconnect_uses_supplied_correlation_id(self) -> None:
+        self._link_and_store_credential()
+        disconnect_principal(
+            self.principal.id,
+            tokens=self.tokens,
+            credentials=self.credentials,
+            accounts=self.accounts,
+            vault=self.vault,
+            audit=self.audit,
+            now=NOW,
+            correlation_id="support-corr-1",
+        )
+        events = self.audit.list_for_principal(self.principal.id)
+        self.assertEqual(events[0].correlation_id, "support-corr-1")
+
+    def test_disconnect_replaces_unsafe_correlation_id(self) -> None:
+        self._link_and_store_credential()
+        disconnect_principal(
+            self.principal.id,
+            tokens=self.tokens,
+            credentials=self.credentials,
+            accounts=self.accounts,
+            vault=self.vault,
+            audit=self.audit,
+            now=NOW,
+            correlation_id="bad value with spaces",
+        )
+        events = self.audit.list_for_principal(self.principal.id)
+        self.assertRegex(events[0].correlation_id, r"^[A-Za-z0-9._-]{1,128}$")
+        self.assertNotEqual(events[0].correlation_id, "bad value with spaces")
+
     def test_disconnect_is_idempotent(self) -> None:
         """A second disconnect (e.g. a double-submitted form) must not error."""
         self._link_and_store_credential()
@@ -186,6 +223,52 @@ class DisconnectPrincipalTests(unittest.TestCase):
         other_account = self.accounts.get_account(other.id, "9999999999")
         assert other_account is not None
         self.assertEqual(other_account.status, "active")
+
+    def test_disconnect_revokes_every_concurrent_web_session_for_principal(self) -> None:
+        """A principal may be logged into /approvals from two browsers/devices at once.
+
+        Disconnect is destructive and irreversible (docs/AUTH.md "Disconnect") -- it must
+        not leave a second, already-issued browser session usable afterward.
+        """
+        self._link_and_store_credential()
+        first = self.web_sessions.create(self.principal.id, "session-a", "csrf-a", NOW)
+        second = self.web_sessions.create(self.principal.id, "session-b", "csrf-b", NOW)
+        other = self.principals.get_or_create("https://accounts.google.com", "sub-2")
+        other_session = self.web_sessions.create(other.id, "session-other", "csrf-other", NOW)
+
+        disconnect_principal(
+            self.principal.id,
+            tokens=self.tokens,
+            credentials=self.credentials,
+            accounts=self.accounts,
+            vault=self.vault,
+            audit=self.audit,
+            now=NOW,
+            web_sessions=self.web_sessions,
+        )
+
+        self.assertTrue(self.web_sessions.lookup(first.token).revoked)
+        self.assertTrue(self.web_sessions.lookup(second.token).revoked)
+        # A different principal's concurrent session is untouched.
+        self.assertFalse(self.web_sessions.lookup(other_session.token).revoked)
+
+    def test_disconnect_without_web_sessions_argument_leaves_sessions_untouched(self) -> None:
+        """``web_sessions`` is optional so non-browser callers aren't forced to supply one;
+        when omitted, any existing web session for the principal is simply left alone."""
+        self._link_and_store_credential()
+        session = self.web_sessions.create(self.principal.id, "session-a", "csrf-a", NOW)
+
+        disconnect_principal(
+            self.principal.id,
+            tokens=self.tokens,
+            credentials=self.credentials,
+            accounts=self.accounts,
+            vault=self.vault,
+            audit=self.audit,
+            now=NOW,
+        )
+
+        self.assertFalse(self.web_sessions.lookup(session.token).revoked)
 
 
 if __name__ == "__main__":

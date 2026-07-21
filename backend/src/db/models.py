@@ -10,22 +10,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 
-class PrincipalStatus(str, Enum):
+class PrincipalStatus(StrEnum):
     ACTIVE = "active"
     DISABLED = "disabled"
 
 
-class CredentialStatus(str, Enum):
+class CredentialStatus(StrEnum):
     PENDING = "pending"
     ACTIVE = "active"
     REVOKED = "revoked"
     INVALID = "invalid"
 
 
-class ExecutionStatus(str, Enum):
+class CredentialRevocationStatus(StrEnum):
+    """Durable vault-revocation work state (ADR-0007)."""
+
+    PENDING = "pending"
+    COMPLETED = "completed"
+
+
+class ExecutionStatus(StrEnum):
     """DATABASE.md kararı: execution outbox ``pending -> applied|failed|unknown`` ilerler."""
 
     PENDING = "pending"
@@ -67,6 +74,22 @@ class OAuthCredential:
     status: CredentialStatus
     key_version: int
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class CredentialRevocationJob:
+    """Secret-free snapshot used to revoke one credential from the vault."""
+
+    id: str
+    principal_id: str
+    credential_id: str
+    vault_ref: str
+    status: CredentialRevocationStatus
+    attempts: int
+    next_attempt_at: datetime
+    last_error_code: str | None
+    created_at: datetime
+    completed_at: datetime | None
 
 
 @dataclass(frozen=True)

@@ -13,12 +13,23 @@ dependencies = [
     "cryptography>=43.0",
     "google-ads>=31.1.0",
     "mcp>=1.28.0",
+    "SQLAlchemy>=2.0",
+    "Alembic>=1.13",
+    "psycopg[binary]>=3.2",
 ]
 
-# Test runner is stdlib `unittest` (docs/TESTING.md) -- `httpx` above already
-# provides the ASGI transport FastAPI's TestClient needs, so no extra test-only
-# dependency group exists yet. pytest/formatter/linter/type-checker selection is
-# still an open question in docs/TESTING.md and is not resolved by this file.
+# Dev/CI quality tooling selected in docs/decisions/0003-dev-tooling.md. `pytest`
+# runs the existing `unittest.TestCase` suite unchanged (no test rewrite needed).
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.15.22",
+    "pyright>=1.1.411",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "bandit>=1.9.4",
+    "detect-secrets>=1.5.0",
+    "pip-audit>=2.10.1",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -26,3 +37,46 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["src*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [".data"]
+
+[tool.ruff.lint]
+# E/F: pyflakes+pycodestyle core, I: isort, UP: pyupgrade, B: bugbear,
+# SIM: simplification. Security scanning is Bandit's job (ADR-0003), not
+# duplicated here via Ruff's `S` subset.
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests bootstrap `sys.path` with the repo root before importing `backend.*`
+# (see any test's `ROOT = Path(...); sys.path.insert(...)` header), which is
+# necessarily a module-level import after a statement (E402). Negative tests
+# also assert on the broad `Exception` a revoked/rotated token raises (B017).
+"tests/*" = ["E402", "B017"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's DI pattern (`param: T = Depends(...)`) is a documented exception
+# to B008 (function-call-in-default-argument), not a real mutable-default bug.
+# `RetryPolicy` is `@dataclass(frozen=True, slots=True)` (src/api/retry.py) --
+# a shared default instance is safe, not a mutable-default bug either.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Form", "src.api.retry.RetryPolicy"]
+
+[tool.pyright]
+include = ["src"]
+exclude = ["**/__pycache__", ".data"]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["src"]
+
+[tool.coverage.report]
+fail_under = 80
+
+[tool.bandit]
+exclude_dirs = ["tests", ".data"]

@@ -18,11 +18,12 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import re
 import secrets
-from dataclasses import dataclass, replace
-from datetime import datetime, timedelta, timezone
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Mapping
 from urllib.parse import urlsplit
 
 
@@ -37,7 +38,7 @@ class AuthError(ValueError):
 def _utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise AuthError("invalid_request", "Zaman timezone bilgisi icermelidir.")
-    return value.astimezone(timezone.utc)
+    return value.astimezone(UTC)
 
 
 def hash_token(raw_token: str) -> str:
@@ -48,6 +49,13 @@ def hash_token(raw_token: str) -> str:
 # ---------------------------------------------------------------------------
 # PKCE (RFC 7636) -- S256 only, per SECURITY.md and the MCP authorization spec.
 # ---------------------------------------------------------------------------
+
+#: RFC 7636 s4.1: a code_verifier/code_challenge is 43-128 characters of unreserved
+#: base64url characters. Rejecting anything outside that shape before it reaches
+#: ``hashlib.sha256``/storage closes off oversized or non-conforming values instead
+#: of merely letting them fail the digest comparison.
+_PKCE_VALUE_RE = re.compile(r"^[A-Za-z0-9_-]{43,128}$")
+
 
 def compute_code_challenge(code_verifier: str) -> str:
     """Return the S256 code_challenge for a verifier (also used by tests/tools)."""
@@ -60,6 +68,8 @@ def verify_pkce(code_verifier: str, code_challenge: str, code_challenge_method: 
     if code_challenge_method != "S256":
         return False
     if not code_verifier or not code_challenge:
+        return False
+    if _PKCE_VALUE_RE.match(code_verifier) is None:
         return False
     expected = compute_code_challenge(code_verifier)
     return secrets.compare_digest(expected, code_challenge)
@@ -100,6 +110,7 @@ def redirect_uri_allowed(candidate: str, registered: str) -> bool:
 # Client ID Metadata Document (CIMD) validation.
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True, slots=True)
 class ClientIdentity:
     """A resolved OAuth client. In this increment, always sourced from a CIMD document."""
@@ -114,7 +125,9 @@ def _origin(url: str) -> tuple[str, str, int | None]:
     return (parsed.scheme, parsed.hostname or "", parsed.port)
 
 
-def validate_cimd_document(claimed_client_id_url: str, document: Mapping[str, object]) -> ClientIdentity:
+def validate_cimd_document(
+    claimed_client_id_url: str, document: Mapping[str, object]
+) -> ClientIdentity:
     """Validate an already-fetched CIMD document (draft-ietf-oauth-client-id-metadata-document).
 
     The document must be self-referential (its own ``client_id`` equals the URL it was
@@ -135,7 +148,9 @@ def validate_cimd_document(claimed_client_id_url: str, document: Mapping[str, ob
         if not isinstance(uri, str) or not uri:
             raise AuthError("invalid_client", "redirect_uris yalniz dolu string icerebilir.")
         if not _is_loopback_uri(uri) and _origin(uri) != claimed_origin:
-            raise AuthError("invalid_client", "redirect_uri, client_id ile ayni origin'de olmalidir.")
+            raise AuthError(
+                "invalid_client", "redirect_uri, client_id ile ayni origin'de olmalidir."
+            )
         validated.append(uri)
     auth_method = document.get("token_endpoint_auth_method", "none")
     if auth_method != "none":
@@ -151,10 +166,20 @@ def validate_cimd_document(claimed_client_id_url: str, document: Mapping[str, ob
 # Authorization transaction (the /authorize request, pre-consent).
 # ---------------------------------------------------------------------------
 
+
 class TransactionStatus(StrEnum):
     PENDING = "pending"
     CONSENTED = "consented"
     COMPLETED = "completed"
+
+
+#: RFC 6749 does not cap ``state``/``scope`` length, but both are stored verbatim
+#: and ``state`` is echoed back into a redirect URL -- an unbounded value would let
+#: a client bloat the transaction row or build an oversized redirect. Both bounds
+#: are generous relative to any real client's usage (a base64url-encoded UUID or a
+#: short space-separated scope list).
+MAX_STATE_LENGTH = 512
+MAX_SCOPE_LENGTH = 512
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +194,7 @@ class AuthorizationTransaction:
     resource: str
     scope: str
     client_state: str
+    consent_csrf_hash: str
     expires_at: datetime
     status: TransactionStatus = TransactionStatus.PENDING
 
@@ -185,20 +211,34 @@ class AuthorizationTransaction:
         expected_resource: str,
         scope: str,
         client_state: str,
+        consent_csrf_hash: str,
         now: datetime,
         ttl_seconds: int = 600,
-    ) -> "AuthorizationTransaction":
+    ) -> AuthorizationTransaction:
         """Validate and open a new transaction. Fails closed on any RFC 8707/PKCE mismatch."""
         if code_challenge_method != "S256":
             raise AuthError("invalid_request", "Yalniz S256 code_challenge_method desteklenir.")
-        if not code_challenge:
-            raise AuthError("invalid_request", "code_challenge zorunludur.")
+        if not code_challenge or _PKCE_VALUE_RE.match(code_challenge) is None:
+            raise AuthError(
+                "invalid_request",
+                "code_challenge RFC 7636 uyumlu 43-128 karakterlik base64url bir deger olmalidir.",
+            )
         if not any(redirect_uri_allowed(redirect_uri, reg) for reg in client.redirect_uris):
             raise AuthError("invalid_request", "redirect_uri istemci kaydiyla eslesmiyor.")
         if resource != expected_resource:
             raise AuthError("invalid_target", "resource bu MCP sunucusuyla eslesmiyor.")
         if not transaction_id or not client_state:
             raise AuthError("invalid_request", "transaction_id ve state zorunludur.")
+        if len(client_state) > MAX_STATE_LENGTH:
+            raise AuthError(
+                "invalid_request", f"state en fazla {MAX_STATE_LENGTH} karakter olabilir."
+            )
+        if len(scope) > MAX_SCOPE_LENGTH:
+            raise AuthError(
+                "invalid_request", f"scope en fazla {MAX_SCOPE_LENGTH} karakter olabilir."
+            )
+        if not consent_csrf_hash:
+            raise AuthError("invalid_request", "consent_csrf_hash zorunludur.")
         return cls(
             transaction_id=transaction_id,
             client_id=client.client_id,
@@ -208,11 +248,14 @@ class AuthorizationTransaction:
             resource=resource,
             scope=scope,
             client_state=client_state,
+            consent_csrf_hash=consent_csrf_hash,
             expires_at=_utc(now) + timedelta(seconds=ttl_seconds),
         )
 
 
-def consent_transaction(transaction: AuthorizationTransaction, *, now: datetime) -> AuthorizationTransaction:
+def consent_transaction(
+    transaction: AuthorizationTransaction, *, now: datetime
+) -> AuthorizationTransaction:
     """Move a pending transaction into consented, ready for the Google upstream leg."""
     if transaction.status is not TransactionStatus.PENDING:
         raise AuthError("invalid_request", "Islem onay bekleyen durumda degil.")
@@ -221,7 +264,28 @@ def consent_transaction(transaction: AuthorizationTransaction, *, now: datetime)
     return replace(transaction, status=TransactionStatus.CONSENTED)
 
 
-def complete_transaction(transaction: AuthorizationTransaction, *, now: datetime) -> AuthorizationTransaction:
+def verify_consent_csrf(presented_cookie: str | None, expected_hash: str) -> None:
+    """Fail-closed check that ``POST /authorize/consent`` came from the browser that
+    actually loaded the matching ``GET /authorize`` page.
+
+    Unlike a typical CSRF secret, ``consent_csrf`` is not unknown to an attacker --
+    anyone can call ``GET /authorize`` themselves (there is no principal yet at this
+    stage) and read the value straight out of the response. What this check actually
+    verifies is that the *requesting browser's own cookie jar* holds the value the
+    server issued for this exact ``transaction_id`` -- a cross-site forged POST (the
+    account-linking CSRF docs/AUTH.md names) never carries that ``SameSite=Strict``
+    cookie, because the victim's browser never loaded the attacker's transaction's
+    ``GET /authorize`` response and so never received its ``Set-Cookie``.
+    """
+    if not presented_cookie or not secrets.compare_digest(
+        hash_token(presented_cookie), expected_hash
+    ):
+        raise AuthError("invalid_request", "Yetkilendirme onayi dogrulanamadi (csrf).")
+
+
+def complete_transaction(
+    transaction: AuthorizationTransaction, *, now: datetime
+) -> AuthorizationTransaction:
     """Close out a transaction once our own authorization code has been issued."""
     if transaction.status is not TransactionStatus.CONSENTED:
         raise AuthError("invalid_request", "Islem onaylanmadan tamamlanamaz.")
@@ -234,11 +298,17 @@ def complete_transaction(transaction: AuthorizationTransaction, *, now: datetime
 # Authorization code -- single-use, bound to the transaction's exact PKCE/resource.
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True, slots=True)
 class AuthorizationCode:
-    """A single-use grant tying a resolved principal to the original /authorize request."""
+    """A single-use grant tying a resolved principal to the original /authorize request.
 
-    code: str
+    ``code`` carries ``repr=False`` -- it is bearer-equivalent (single-use, but
+    still a secret in flight) and this object is threaded through the whole
+    /authorize -> /token exchange (backend/tests/test_secret_redaction.py).
+    """
+
+    code: str = field(repr=False)
     transaction_id: str
     principal_id: str
     client_id: str
@@ -328,6 +398,7 @@ def consume_authorization_code(
 # Access / refresh tokens -- rotation with reuse detection (OAuth 2.1 token theft).
 # ---------------------------------------------------------------------------
 
+
 class RefreshTokenStatus(StrEnum):
     ACTIVE = "active"
     ROTATED = "rotated"
@@ -336,7 +407,11 @@ class RefreshTokenStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class AccessToken:
-    token: str
+    """A connector-issued bearer token. ``token`` carries ``repr=False`` --
+    the raw bearer value must never appear in a ``repr()``/``str()`` of this
+    object (backend/tests/test_secret_redaction.py)."""
+
+    token: str = field(repr=False)
     principal_id: str
     client_id: str
     resource: str
@@ -346,7 +421,10 @@ class AccessToken:
 
 @dataclass(frozen=True, slots=True)
 class RefreshToken:
-    token: str
+    """A connector-issued refresh token. ``token`` carries ``repr=False`` --
+    same rationale as ``AccessToken.token``."""
+
+    token: str = field(repr=False)
     family_id: str
     principal_id: str
     client_id: str

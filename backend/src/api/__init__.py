@@ -11,6 +11,7 @@ absent until Google's RMF/Compliance classification closes
 """
 
 from .errors import AdsApiError, ErrorClass, classify_google_ads_exception, classify_transport_error
+from .problems import PROBLEM_JSON, problem_body, problem_response
 from .queries import DateRange
 from .reporting import (
     FakeGoogleAdsSearchService,
@@ -27,6 +28,9 @@ __all__ = [
     "ErrorClass",
     "classify_google_ads_exception",
     "classify_transport_error",
+    "PROBLEM_JSON",
+    "problem_body",
+    "problem_response",
     "DateRange",
     "FakeGoogleAdsSearchService",
     "GoogleAdsCredentials",

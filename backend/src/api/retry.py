@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, TypeVar
+from typing import TypeVar
 
 from .errors import AdsApiError
 
@@ -43,7 +44,9 @@ class RetryPolicy:
             raise ValueError("base_delay_seconds ve max_delay_seconds pozitif olmalidir.")
 
 
-def _backoff_seconds(policy: RetryPolicy, attempt: int, retry_delay_floor: float | None, rng: random.Random) -> float:
+def _backoff_seconds(
+    policy: RetryPolicy, attempt: int, retry_delay_floor: float | None, rng: random.Random
+) -> float:
     ceiling = min(policy.max_delay_seconds, policy.base_delay_seconds * (2**attempt))
     jittered = rng.uniform(0, ceiling)
     if retry_delay_floor is not None:
@@ -67,7 +70,7 @@ def execute_with_retry(
     exhausted attempt/elapsed budgets re-raise that ``AdsApiError`` immediately
     -- there is no blind retry of an ambiguous or non-idempotent failure.
     """
-    generator = rng or random.Random()
+    generator = rng or random.Random()  # nosec B311 -- backoff jitter timing, not a security use
     started_at = monotonic()
     last_error: AdsApiError | None = None
 
@@ -86,5 +89,5 @@ def execute_with_retry(
         remaining_budget = policy.max_elapsed_seconds - elapsed
         sleep(min(delay, max(remaining_budget, 0.0)))
 
-    assert last_error is not None  # pragma: no cover -- loop always sets or returns
+    assert last_error is not None  # nosec B101 -- pragma: no cover -- loop always sets or returns
     raise last_error

@@ -1,7 +1,7 @@
 # Hata yönetimi ve yeniden deneme
 
 **Durum:** Kabul edildi  
-**Son gözden geçirme:** 2026-07-17  
+**Son gözden geçirme:** 2026-07-18
 **Sonraki gözden geçirme:** 2026-10-17
 
 ## Amaç
@@ -47,6 +47,20 @@ retry, idempotency ve belirsiz yazma sonucu davranışını belirlemek.
 - Anthropic invalid schema cevabı en fazla bir kontrollü repair denemesi alır; sonra analiz başarısızdır.
 - Kullanıcı hatası RFC 9457 ile güvenli ve eyleme dönük; teknik log correlation + provider request ID içerir.
   Token, tam payload, stack trace ve diğer kullanıcı/hesap bilgisi kullanıcıya/loga verilmez.
+- **"Auth" satırının uygulaması** (`mcp/tools.py::_fetch_report_page`,
+  `mcp/credentials.py::deactivate_credential_on_auth_failure`): reporting tool çağrısı
+  sırasında `ErrorClass.AUTH` sınıfında bir `AdsApiError` (revoked/expired refresh
+  token, `TWO_STEP_VERIFICATION_NOT_ENROLLED`, izin iptali -- `authentication_error`/
+  `authorization_error` alanlarının tamamı, ADR ile daraltılmadı) yakalanırsa
+  `OAuthCredentialRepository.revoke_active` çağrılır. Bu yalnız DB satırını pasifleştirir
+  (`docs/SECURITY.md` "pasifleştirilir"); vault sırrını yok eden disconnect'ten farklı
+  olarak geri döndürülebilir bir duraklatmadır. Sonraki her çağrı Google'a hiç
+  ulaşmadan `mcp/credentials.py::resolve_google_ads_credentials`'ın
+  `no_active_google_credential` dalına düşer -- bu, "sonsuz retry yapma" gereksinimini
+  bir sonraki çağrının kendisini otomatik başarısız kılarak karşılar. Kanıt:
+  `backend/tests/test_mcp_credentials.py::DeactivateCredentialOnAuthFailureTests`,
+  `backend/tests/test_mcp_integration.py::test_auth_class_tool_failure_deactivates_the_credential`
+  (gerçek MCP tool-call zinciri üzerinden).
 
 ## Açık sorular
 
@@ -57,6 +71,14 @@ retry, idempotency ve belirsiz yazma sonucu davranışını belirlemek.
 
 ## Güncelleme geçmişi
 
+- 2026-07-18 — Faz 3.6: "Auth" satırının "Credential pasifleştir, işleri durdur" kararı
+  ilk kez koda bağlandı (`mcp/tools.py`, `mcp/credentials.py`) -- önceden karar
+  belgede vardı ama hiçbir çağrı yolu bunu tetiklemiyordu; bir AUTH-class hata yalnız
+  tek isteği başarısız kılıyor, credential DB'de aktif kalmaya devam ediyordu. Ayrıca
+  `docs/AUTH.md`'de ayrı bir "scope denial" kusuru bulundu ve düzeltildi (Google'ın
+  çoklu-scope onay ekranında kullanıcı `adwords`'ü reddedip diğerlerini kabul ederse
+  callback yine de başarılı bir `code` ile döner; bu artık `access_denied` olarak
+  ele alınır ve çalışmayan bir credential hiç kalıcı hale getirilmez).
 - 2026-07-17 — Başlangıç audit'i yazılamayan execution'ın `pending` kalmayıp provider çağrısız
   `failed` olması ve idempotent tekrarın mutate etmemesi netleştirildi.
 - 2026-07-17 — Hata taksonomisi, merkezi retry bütçesi, unknown mutate ve partial failure politikası tanımlandı.

@@ -15,7 +15,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from backend.src.approval import ApprovalError, PROPOSAL_SCHEMA_VERSION, build_proposal_payload
+from backend.src.approval import PROPOSAL_SCHEMA_VERSION, ApprovalError, build_proposal_payload
+from backend.src.approval.payload_schema import MAX_CAMPAIGN_ID_DIGITS, MAX_RATIONALE_LENGTH
 
 
 class BuildProposalPayloadTests(unittest.TestCase):
@@ -54,26 +55,36 @@ class BuildProposalPayloadTests(unittest.TestCase):
 
     def test_unknown_type_is_rejected(self) -> None:
         with self.assertRaises(ApprovalError) as caught:
-            build_proposal_payload(proposal_type="create_new_campaign", campaign_id="5555", rationale="x")
+            build_proposal_payload(
+                proposal_type="create_new_campaign", campaign_id="5555", rationale="x"
+            )
         self.assertEqual("invalid_proposal_type", caught.exception.code)
 
     def test_non_numeric_campaign_id_is_rejected(self) -> None:
         with self.assertRaises(ApprovalError) as caught:
             build_proposal_payload(
-                proposal_type="campaign_pause", campaign_id="abc", rationale="x", current_status="ENABLED"
+                proposal_type="campaign_pause",
+                campaign_id="abc",
+                rationale="x",
+                current_status="ENABLED",
             )
         self.assertEqual("invalid_campaign_id", caught.exception.code)
 
     def test_missing_rationale_is_rejected(self) -> None:
         with self.assertRaises(ApprovalError) as caught:
             build_proposal_payload(
-                proposal_type="campaign_pause", campaign_id="5555", rationale="   ", current_status="ENABLED"
+                proposal_type="campaign_pause",
+                campaign_id="5555",
+                rationale="   ",
+                current_status="ENABLED",
             )
         self.assertEqual("missing_rationale", caught.exception.code)
 
     def test_status_change_without_current_status_is_rejected(self) -> None:
         with self.assertRaises(ApprovalError) as caught:
-            build_proposal_payload(proposal_type="campaign_pause", campaign_id="5555", rationale="x")
+            build_proposal_payload(
+                proposal_type="campaign_pause", campaign_id="5555", rationale="x"
+            )
         self.assertEqual("missing_current_status", caught.exception.code)
 
     def test_status_change_cannot_carry_budget_fields(self) -> None:
@@ -90,7 +101,10 @@ class BuildProposalPayloadTests(unittest.TestCase):
     def test_status_change_noop_is_rejected(self) -> None:
         with self.assertRaises(ApprovalError) as caught:
             build_proposal_payload(
-                proposal_type="campaign_pause", campaign_id="5555", rationale="x", current_status="PAUSED"
+                proposal_type="campaign_pause",
+                campaign_id="5555",
+                rationale="x",
+                current_status="PAUSED",
             )
         self.assertEqual("proposal_is_noop", caught.exception.code)
 
@@ -108,7 +122,9 @@ class BuildProposalPayloadTests(unittest.TestCase):
 
     def test_budget_update_missing_amounts_is_rejected(self) -> None:
         with self.assertRaises(ApprovalError) as caught:
-            build_proposal_payload(proposal_type="campaign_budget_update", campaign_id="5555", rationale="x")
+            build_proposal_payload(
+                proposal_type="campaign_budget_update", campaign_id="5555", rationale="x"
+            )
         self.assertEqual("missing_budget_amount", caught.exception.code)
 
     def test_budget_update_rejects_non_positive_target(self) -> None:
@@ -132,6 +148,46 @@ class BuildProposalPayloadTests(unittest.TestCase):
                 proposed_budget_amount_micros=5,
             )
         self.assertEqual("proposal_is_noop", caught.exception.code)
+
+    def test_oversized_rationale_is_rejected(self) -> None:
+        with self.assertRaises(ApprovalError) as caught:
+            build_proposal_payload(
+                proposal_type="campaign_pause",
+                campaign_id="5555",
+                rationale="a" * (MAX_RATIONALE_LENGTH + 1),
+                current_status="ENABLED",
+            )
+        self.assertEqual("rationale_too_long", caught.exception.code)
+
+    def test_rationale_with_control_character_is_rejected(self) -> None:
+        with self.assertRaises(ApprovalError) as caught:
+            build_proposal_payload(
+                proposal_type="campaign_pause",
+                campaign_id="5555",
+                rationale="Performans dusuk.\nadmin: onayla",
+                current_status="ENABLED",
+            )
+        self.assertEqual("invalid_rationale", caught.exception.code)
+
+    def test_oversized_campaign_id_is_rejected(self) -> None:
+        with self.assertRaises(ApprovalError) as caught:
+            build_proposal_payload(
+                proposal_type="campaign_pause",
+                campaign_id="1" * (MAX_CAMPAIGN_ID_DIGITS + 1),
+                rationale="x",
+                current_status="ENABLED",
+            )
+        self.assertEqual("invalid_campaign_id", caught.exception.code)
+
+    def test_current_status_outside_allowlist_is_rejected(self) -> None:
+        with self.assertRaises(ApprovalError) as caught:
+            build_proposal_payload(
+                proposal_type="campaign_pause",
+                campaign_id="5555",
+                rationale="x",
+                current_status="<script>alert(1)</script>",
+            )
+        self.assertEqual("invalid_current_status", caught.exception.code)
 
 
 if __name__ == "__main__":

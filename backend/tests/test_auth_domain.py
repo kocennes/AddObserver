@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from backend.src.auth.domain import (
+    MAX_SCOPE_LENGTH,
+    MAX_STATE_LENGTH,
     AuthError,
     AuthorizationCode,
     AuthorizationTransaction,
@@ -30,7 +32,7 @@ from backend.src.auth.domain import (
     verify_pkce,
 )
 
-NOW = datetime(2026, 7, 17, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 17, 12, 0, 0, tzinfo=UTC)
 MCP_RESOURCE = "https://mcp.example.com/mcp"
 
 CLAUDE_CODE_CLIENT_ID = "https://claude.ai/oauth/claude-code-client-metadata"
@@ -67,6 +69,19 @@ class PkceTests(unittest.TestCase):
         verifier, _ = _pkce_pair()
         self.assertFalse(verify_pkce(verifier, verifier, "plain"))
 
+    def test_undersized_verifier_rejected(self) -> None:
+        """RFC 7636 s4.1 requires 43-128 characters; 42 is one short."""
+        _, challenge = _pkce_pair()
+        self.assertFalse(verify_pkce("a" * 42, challenge, "S256"))
+
+    def test_oversized_verifier_rejected(self) -> None:
+        _, challenge = _pkce_pair()
+        self.assertFalse(verify_pkce("a" * 129, challenge, "S256"))
+
+    def test_non_base64url_verifier_rejected(self) -> None:
+        _, challenge = _pkce_pair()
+        self.assertFalse(verify_pkce("a" * 40 + "!@#", challenge, "S256"))
+
 
 class RedirectUriTests(unittest.TestCase):
     def test_exact_match(self) -> None:
@@ -78,18 +93,30 @@ class RedirectUriTests(unittest.TestCase):
 
     def test_loopback_port_ignored(self) -> None:
         """Claude Code binds an ephemeral port at runtime (RFC 8252 s7.3)."""
-        self.assertTrue(redirect_uri_allowed("http://127.0.0.1:54321/callback", "http://127.0.0.1/callback"))
-        self.assertTrue(redirect_uri_allowed("http://localhost:9999/callback", "http://localhost/callback"))
+        self.assertTrue(
+            redirect_uri_allowed("http://127.0.0.1:54321/callback", "http://127.0.0.1/callback")
+        )
+        self.assertTrue(
+            redirect_uri_allowed("http://localhost:9999/callback", "http://localhost/callback")
+        )
 
     def test_loopback_path_mismatch_rejected(self) -> None:
-        self.assertFalse(redirect_uri_allowed("http://127.0.0.1:54321/other", "http://127.0.0.1/callback"))
+        self.assertFalse(
+            redirect_uri_allowed("http://127.0.0.1:54321/other", "http://127.0.0.1/callback")
+        )
 
     def test_non_loopback_port_mismatch_rejected(self) -> None:
         """Only loopback hosts get the port exception -- no general port laxity."""
-        self.assertFalse(redirect_uri_allowed("https://evil.example.com:9/callback", "https://evil.example.com/callback"))
+        self.assertFalse(
+            redirect_uri_allowed(
+                "https://evil.example.com:9/callback", "https://evil.example.com/callback"
+            )
+        )
 
     def test_cross_loopback_host_rejected(self) -> None:
-        self.assertFalse(redirect_uri_allowed("http://localhost/callback", "http://127.0.0.1/callback"))
+        self.assertFalse(
+            redirect_uri_allowed("http://localhost/callback", "http://127.0.0.1/callback")
+        )
 
 
 class CimdValidationTests(unittest.TestCase):
@@ -113,13 +140,18 @@ class CimdValidationTests(unittest.TestCase):
                 "token_endpoint_auth_method": "none",
             },
         )
-        self.assertEqual(identity.redirect_uris, ("http://localhost/callback", "http://127.0.0.1/callback"))
+        self.assertEqual(
+            identity.redirect_uris, ("http://localhost/callback", "http://127.0.0.1/callback")
+        )
 
     def test_non_self_referential_document_rejected(self) -> None:
         with self.assertRaises(AuthError) as ctx:
             validate_cimd_document(
                 WEB_CLIENT_ID,
-                {"client_id": "https://attacker.example.com/cimd", "redirect_uris": ["https://claude.ai/x"]},
+                {
+                    "client_id": "https://attacker.example.com/cimd",
+                    "redirect_uris": ["https://claude.ai/x"],
+                },
             )
         self.assertEqual(ctx.exception.code, "invalid_client")
 
@@ -162,6 +194,7 @@ class TransactionLifecycleTests(unittest.TestCase):
             expected_resource=MCP_RESOURCE,
             scope="adwords",
             client_state="client-opaque-state",
+            consent_csrf_hash="test-consent-csrf-hash",
             now=NOW,
         )
         params.update(overrides)
@@ -183,6 +216,26 @@ class TransactionLifecycleTests(unittest.TestCase):
     def test_plain_challenge_method_rejected(self) -> None:
         with self.assertRaises(AuthError):
             self._create(code_challenge_method="plain")
+
+    def test_undersized_code_challenge_rejected(self) -> None:
+        with self.assertRaises(AuthError) as ctx:
+            self._create(code_challenge="a" * 42)
+        self.assertEqual(ctx.exception.code, "invalid_request")
+
+    def test_non_base64url_code_challenge_rejected(self) -> None:
+        with self.assertRaises(AuthError) as ctx:
+            self._create(code_challenge="a" * 40 + "!@#")
+        self.assertEqual(ctx.exception.code, "invalid_request")
+
+    def test_oversized_state_rejected(self) -> None:
+        with self.assertRaises(AuthError) as ctx:
+            self._create(client_state="s" * (MAX_STATE_LENGTH + 1))
+        self.assertEqual(ctx.exception.code, "invalid_request")
+
+    def test_oversized_scope_rejected(self) -> None:
+        with self.assertRaises(AuthError) as ctx:
+            self._create(scope="s" * (MAX_SCOPE_LENGTH + 1))
+        self.assertEqual(ctx.exception.code, "invalid_request")
 
     def test_full_authorization_code_round_trip(self) -> None:
         _, verifier, txn = self._create()
@@ -227,6 +280,7 @@ class AuthorizationCodeConsumptionTests(unittest.TestCase):
             expected_resource=MCP_RESOURCE,
             scope="adwords",
             client_state="state",
+            consent_csrf_hash="test-consent-csrf-hash",
             now=NOW,
         )
         consented = consent_transaction(txn, now=NOW)
@@ -273,6 +327,21 @@ class AuthorizationCodeConsumptionTests(unittest.TestCase):
                 now=NOW,
             )
 
+    def test_oversized_pkce_verifier_rejected(self) -> None:
+        """RFC 7636's 128-character cap is enforced before the digest comparison."""
+        verifier, code = self._issue_code()
+        with self.assertRaises(AuthError) as ctx:
+            consume_authorization_code(
+                code,
+                client_id=WEB_CLIENT_ID,
+                redirect_uri=code.redirect_uri,
+                resource=MCP_RESOURCE,
+                code_verifier=verifier + "x" * (129 - len(verifier)),
+                already_consumed=False,
+                now=NOW,
+            )
+        self.assertEqual(ctx.exception.code, "invalid_grant")
+
     def test_wrong_client_rejected(self) -> None:
         """A code minted for one client cannot be redeemed by another (cross-client theft)."""
         verifier, code = self._issue_code()
@@ -315,6 +384,7 @@ class RefreshRotationTests(unittest.TestCase):
             expected_resource=MCP_RESOURCE,
             scope="adwords",
             client_state="state",
+            consent_csrf_hash="test-consent-csrf-hash",
             now=NOW,
         )
         consented = consent_transaction(txn, now=NOW)

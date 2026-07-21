@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -26,7 +25,7 @@ class ApprovalDomainTests(unittest.TestCase):
     """Prove that execution cannot bypass ownership and immutable approval."""
 
     def setUp(self) -> None:
-        self.now = datetime(2026, 7, 17, 12, tzinfo=timezone.utc)
+        self.now = datetime(2026, 7, 17, 12, tzinfo=UTC)
         self.payload = {"type": "campaign_budget_update", "after": {"amount_micros": 5_000_000}}
         draft = Proposal.create(
             proposal_id="proposal-1",

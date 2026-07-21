@@ -16,12 +16,103 @@ yazılır. Ödeme/abonelik altyapısı yoktur ve eklenmeyecektir.
 6. Güvenlik, tasarım, veri, API, MCP, test, operasyon ve hukuki belgeler kod için bağlayıcıdır;
    davranış değiştiğinde ilgili belge de aynı değişiklikte güncellenir.
 
+## Yerel kurulum ve çalıştırma
+
+Tüm komutlar **repo kök dizininden** (`AddObserver/`) çalıştırılmalıdır; `.env` dosyası ve
+SQLite yolu (`backend/.data/local.db`) çalışma dizinine göre çözülür.
+
+1. Python 3.11+ ile bir sanal ortam oluşturup etkinleştirin:
+   ```powershell
+   python -m venv .venv
+   .venv\Scripts\Activate.ps1        # POSIX: source .venv/bin/activate
+   ```
+2. Backend bağımlılıklarını kurun (`backend/pyproject.toml`):
+   ```powershell
+   pip install -e backend
+   ```
+3. `.env.example` dosyasını `.env` olarak kopyalayın ve `LOCAL_VAULT_KEY` için gerçek bir Fernet
+   anahtarı üretin:
+   ```powershell
+   Copy-Item .env.example .env        # POSIX: cp .env.example .env
+   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   ```
+   Çıktıyı `.env` içindeki `LOCAL_VAULT_KEY=` satırına yapıştırın. Bu anahtar yalnız yerel
+   `LocalEncryptedVault`'u (dev) şifreler; gerçek bir credential veya secret DEĞİLDİR ama yine de
+   commit edilmemelidir (`.env` `.gitignore`'dadır).
+4. Gerçek bir Google Ads hesabı bağlamadan uygulamayı ayağa kaldırmak (credential gerektirmeyen
+   local smoke yolu) için `GOOGLE_ADS_CLIENT_ID`/`GOOGLE_ADS_CLIENT_SECRET`/
+   `GOOGLE_ADS_DEVELOPER_TOKEN` alanlarına herhangi bir placeholder metin yazmak yeterlidir —
+   uygulama başlangıcında bu değerler doğrulanmaz, yalnız gerçek Google OAuth/Ads çağrısı
+   yapıldığında devreye girer. Gerçek Google Ads erişimi için `docs/AUTH.md` ve
+   `docs/GOOGLE_API_ACCESS.md`'deki koşullar geçerlidir.
+5. Uygulamayı başlatın:
+   ```powershell
+   python -m uvicorn backend.src.app:create_app --factory
+   ```
+   `--factory` bilinçlidir: düz bir `app = create_app()` içe aktarma anında gerçek bir sqlite
+   bağlantısı/vault/Google OAuth istemcisi kurar (bkz. `backend/src/app.py` docstring'i).
+6. Smoke kontrolü — ayrı bir terminalde:
+   ```powershell
+   curl http://localhost:8000/healthz
+   curl http://localhost:8000/readyz
+   ```
+   İkisi de `{"status":"ok"}` döner; `backend/.data/local.db` otomatik oluşturulur (gitignore'da).
+
+### Windows'ta Türkçe karakter çıktısı
+
+`tools/check_docs.py` ve `unittest -v` çıktısı, Windows konsolunun varsayılan kod sayfası (ör.
+`cp1254`) yüzünden Türkçe karakterleri bozuk (`Dok?mantasyon` gibi) gösterebilir. Bu yalnız
+konsol görüntüleme sorunudur, dosya içeriği veya test sonucu etkilenmez; düzeltmek için
+komuttan önce UTF-8 modunu zorlayın:
+
+```powershell
+$env:PYTHONUTF8 = "1"
+```
+
 ## Mevcut doğrulama komutları
+
+Kalite araçları (formatter/linter, type checker, test runner, SAST, secret/dependency taraması)
+`docs/decisions/0003-dev-tooling.md`'de karara bağlandı; `backend[dev]` grubuyla kurulur:
+
+```powershell
+pip install -e "backend[dev]"
+```
 
 ```powershell
 python tools/check_docs.py
-python -m unittest discover -s backend/tests -v
+python -m unittest discover -s backend/tests -v      # veya: pytest backend/tests --cov=src --cov-fail-under=80
+ruff format --check backend
+ruff check backend
+pyright backend/src
+Push-Location backend; python -m alembic -c alembic.ini upgrade head --sql; Pop-Location
+bandit -c backend/pyproject.toml -r backend/src
+pip-audit
 ```
+
+Production PostgreSQL runtime helper'ları `DATABASE_URL` ister; yerel varsayılan akış hâlâ
+SQLite prototiptir. `DATABASE_URL` parola içerebileceği için log/çıktı/dokümana gerçek değer
+yazılmamalıdır.
+
+Canlı PostgreSQL RLS entegrasyon testi yalnız disposable bir test veritabanı DSN'i açıkça verilirse
+çalışır; aksi halde skip eder:
+
+```powershell
+$env:ADDOBSERVER_POSTGRES_TEST_DSN = "postgresql+psycopg://user:pass@localhost:5432/addobserver_test"
+python -m unittest backend.tests.test_postgres_rls_integration -v
+```
+
+```powershell
+# detect-secrets-hook denetimi baseline'ı değiştirmez, yalnız verilen dosyaları kontrol eder
+$files = @(git ls-files) + @(git ls-files --others --exclude-standard) | Get-Unique
+detect-secrets-hook --baseline .secrets.baseline @files
+```
+
+pytest, mevcut `unittest.TestCase` testlerini değiştirmeden aynen çalıştırır (yalnız daha zengin
+çıktı ve coverage ekler); `unittest discover` hâlâ bağımsız bir doğrulama yoludur. `.secrets.baseline`
+Windows'ta yeniden üretilirse (`detect-secrets scan --all-files > .secrets.baseline`) dosyadaki yol
+ayırıcıları `\` yerine `/` olacak şekilde normalize edilmelidir (bkz. `docs/TESTING.md`) — aksi halde
+Linux CI'da her satır "yeni secret" gibi görünür. Alembic komutu canlı DB'ye bağlanmadan PostgreSQL
+DDL çıktısı üretir; gerçek migration çalıştırma production/staging runbook ve secret/config gerektirir.
 
 Mimari, ürün, auth, veri modeli, API/MCP sözleşmesi ve tasarım kararları ürün sahibi tarafından
 onaylanıp `Kabul edildi` durumuna geçirildi; `backend/` iskeleti bu kararlar üzerine küçük, test

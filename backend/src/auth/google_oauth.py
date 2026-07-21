@@ -14,10 +14,12 @@ from unverified JWT claims.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Protocol, Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from typing import Protocol, cast
 
 import google.auth.transport.requests
+import google.oauth2.credentials
 import google.oauth2.id_token
 from google_auth_oauthlib.flow import Flow
 
@@ -37,13 +39,23 @@ class GoogleTokenResult:
     """The outcome of redeeming a Google authorization code.
 
     ``refresh_token``/``access_token`` must be handed to a ``VaultClient`` and never
-    stored, logged or returned to any MCP/Claude-facing response.
+    stored, logged or returned to any MCP/Claude-facing response. Both carry
+    ``repr=False`` so an accidental ``repr()``/``str()`` of this object never
+    prints the raw token (backend/tests/test_secret_redaction.py).
     """
 
-    refresh_token: str
-    access_token: str
+    refresh_token: str = field(repr=False)
+    access_token: str = field(repr=False)
     google_subject: str
     email: str | None
+    #: The scopes Google actually granted, or ``None`` if the token response omitted
+    #: ``scope`` -- RFC 6749 s5.1: omission means "identical to what was requested".
+    #: A user can decline part of a multi-scope consent screen (e.g. keep ``openid``/
+    #: ``email`` but reject ``adwords``) while Google still redirects back with a
+    #: successful ``code``; this is the only place that distinction survives the
+    #: exchange, so callers that require a specific scope must check it explicitly
+    #: (auth/server.py -- "scope denial", todo.md 3.6).
+    granted_scopes: tuple[str, ...] | None = None
 
 
 class GoogleOAuthClient(Protocol):
@@ -51,9 +63,11 @@ class GoogleOAuthClient(Protocol):
 
     def build_authorization_url(self, *, state: str) -> str:
         """Return the URL the user is redirected to for Google consent."""
+        ...
 
     def exchange_code(self, *, code: str) -> GoogleTokenResult:
         """Redeem a Google authorization code for tokens and a verified subject."""
+        ...
 
 
 class GoogleWebFlowOAuthClient:
@@ -75,7 +89,7 @@ class GoogleWebFlowOAuthClient:
                 "client_id": client_id,
                 "client_secret": client_secret,
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
+                "token_uri": "https://oauth2.googleapis.com/token",  # nosec B105 -- URL, not a password
             }
         }
 
@@ -97,13 +111,19 @@ class GoogleWebFlowOAuthClient:
     def exchange_code(self, *, code: str) -> GoogleTokenResult:
         flow = self._new_flow()
         flow.fetch_token(code=code)
-        credentials = flow.credentials
+        # `Flow.credentials` is untyped and its helper only returns something other
+        # than `google.oauth2.credentials.Credentials` for external-account ("3pi")
+        # client configs, which `_client_config` above never sets.
+        credentials = cast(google.oauth2.credentials.Credentials, flow.credentials)
         if not credentials.refresh_token:
             raise GoogleOAuthError(
-                "Google refresh_token alinamadi; access_type=offline ve prompt=consent kontrol edin."
+                "Google refresh_token alinamadi; access_type=offline ve prompt=consent "
+                "kontrol edin."
             )
         if not credentials.id_token:
-            raise GoogleOAuthError("Google id_token alinamadi; 'openid' scope'u istendiginden emin olun.")
+            raise GoogleOAuthError(
+                "Google id_token alinamadi; 'openid' scope'u istendiginden emin olun."
+            )
         claims = google.oauth2.id_token.verify_oauth2_token(
             credentials.id_token, google.auth.transport.requests.Request(), self._client_id
         )
@@ -115,15 +135,25 @@ class GoogleWebFlowOAuthClient:
             access_token=credentials.token,
             google_subject=subject,
             email=claims.get("email"),
+            granted_scopes=(
+                tuple(credentials.granted_scopes) if credentials.granted_scopes else None
+            ),
         )
 
 
 class FakeGoogleOAuthClient:
     """Deterministic test double -- no real network/Google call (docs/TESTING.md mock policy)."""
 
-    def __init__(self, *, google_subject: str = "google-sub-1", email: str = "user@example.com") -> None:
+    def __init__(
+        self,
+        *,
+        google_subject: str = "google-sub-1",
+        email: str = "user@example.com",
+        granted_scopes: tuple[str, ...] | None = None,
+    ) -> None:
         self.google_subject = google_subject
         self.email = email
+        self.granted_scopes = granted_scopes
         self.last_code: str | None = None
 
     def build_authorization_url(self, *, state: str) -> str:
@@ -136,4 +166,5 @@ class FakeGoogleOAuthClient:
             access_token=f"fake-google-access-{code}",
             google_subject=self.google_subject,
             email=self.email,
+            granted_scopes=self.granted_scopes,
         )

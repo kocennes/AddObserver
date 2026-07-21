@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ..auth.domain import (
     AccessToken,
@@ -33,7 +33,7 @@ from ..auth.domain import (
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class ClientGrantRepository:
@@ -44,16 +44,19 @@ class ClientGrantRepository:
 
     def record_consent(self, principal_id: str, client_id: str, scope: str) -> None:
         self._conn.execute(
-            "INSERT INTO oauth_client_grant (id, principal_id, client_id, scope, status, created_at) "
+            "INSERT INTO oauth_client_grant "
+            "(id, principal_id, client_id, scope, status, created_at) "
             "VALUES (?, ?, ?, ?, 'active', ?) "
-            "ON CONFLICT(principal_id, client_id) DO UPDATE SET scope = excluded.scope, status = 'active'",
+            "ON CONFLICT(principal_id, client_id) DO UPDATE SET "
+            "scope = excluded.scope, status = 'active'",
             (str(uuid.uuid4()), principal_id, client_id, scope, _now()),
         )
         self._conn.commit()
 
     def has_active_grant(self, principal_id: str, client_id: str) -> bool:
         row = self._conn.execute(
-            "SELECT 1 FROM oauth_client_grant WHERE principal_id = ? AND client_id = ? AND status = 'active'",
+            "SELECT 1 FROM oauth_client_grant "
+            "WHERE principal_id = ? AND client_id = ? AND status = 'active'",
             (principal_id, client_id),
         ).fetchone()
         return row is not None
@@ -68,14 +71,23 @@ class AuthorizationTransactionRepository:
     def save(self, transaction: AuthorizationTransaction) -> None:
         self._conn.execute(
             "INSERT INTO authorization_transaction (id, client_id, redirect_uri, code_challenge, "
-            "code_challenge_method, resource, scope, client_state, status, expires_at, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "code_challenge_method, resource, scope, client_state, consent_csrf_hash, status, "
+            "expires_at, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET status = excluded.status",
             (
-                transaction.transaction_id, transaction.client_id, transaction.redirect_uri,
-                transaction.code_challenge, transaction.code_challenge_method, transaction.resource,
-                transaction.scope, transaction.client_state, transaction.status.value,
-                transaction.expires_at.isoformat(), _now(),
+                transaction.transaction_id,
+                transaction.client_id,
+                transaction.redirect_uri,
+                transaction.code_challenge,
+                transaction.code_challenge_method,
+                transaction.resource,
+                transaction.scope,
+                transaction.client_state,
+                transaction.consent_csrf_hash,
+                transaction.status.value,
+                transaction.expires_at.isoformat(),
+                _now(),
             ),
         )
         self._conn.commit()
@@ -97,6 +109,7 @@ def _transaction_from_row(row: sqlite3.Row) -> AuthorizationTransaction:
         resource=row["resource"],
         scope=row["scope"],
         client_state=row["client_state"],
+        consent_csrf_hash=row["consent_csrf_hash"],
         expires_at=datetime.fromisoformat(row["expires_at"]),
         status=TransactionStatus(row["status"]),
     )
@@ -114,9 +127,17 @@ class AuthorizationCodeRepository:
             "redirect_uri, code_challenge, code_challenge_method, resource, scope, expires_at, "
             "consumed_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
             (
-                hash_token(code.code), code.transaction_id, code.principal_id, code.client_id,
-                code.redirect_uri, code.code_challenge, code.code_challenge_method, code.resource,
-                code.scope, code.expires_at.isoformat(), _now(),
+                hash_token(code.code),
+                code.transaction_id,
+                code.principal_id,
+                code.client_id,
+                code.redirect_uri,
+                code.code_challenge,
+                code.code_challenge_method,
+                code.resource,
+                code.scope,
+                code.expires_at.isoformat(),
+                _now(),
             ),
         )
         self._conn.commit()
@@ -131,7 +152,8 @@ class AuthorizationCodeRepository:
         """
         code_hash = hash_token(raw_code)
         cursor = self._conn.execute(
-            "UPDATE authorization_code SET consumed_at = ? WHERE code_hash = ? AND consumed_at IS NULL",
+            "UPDATE authorization_code SET consumed_at = ? "
+            "WHERE code_hash = ? AND consumed_at IS NULL",
             (_now(), code_hash),
         )
         self._conn.commit()
@@ -169,8 +191,13 @@ class TokenRepository:
             "INSERT INTO access_token (token_hash, principal_id, client_id, resource, scope, "
             "expires_at, revoked_at, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
             (
-                hash_token(token.token), token.principal_id, token.client_id, token.resource,
-                token.scope, token.expires_at.isoformat(), _now(),
+                hash_token(token.token),
+                token.principal_id,
+                token.client_id,
+                token.resource,
+                token.scope,
+                token.expires_at.isoformat(),
+                _now(),
             ),
         )
         self._conn.commit()
@@ -185,7 +212,7 @@ class TokenRepository:
         if row["revoked_at"] is not None:
             return None
         return AccessToken(
-            token="",
+            token="",  # nosec B106 -- placeholder; only the hash is persisted, raw value never stored
             principal_id=row["principal_id"],
             client_id=row["client_id"],
             resource=row["resource"],
@@ -196,10 +223,18 @@ class TokenRepository:
     def save_refresh(self, token: RefreshToken) -> None:
         self._conn.execute(
             "INSERT INTO refresh_token (token_hash, family_id, principal_id, client_id, resource, "
-            "scope, status, expires_at, created_at, rotated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+            "scope, status, expires_at, created_at, rotated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
             (
-                hash_token(token.token), token.family_id, token.principal_id, token.client_id,
-                token.resource, token.scope, token.status.value, token.expires_at.isoformat(), _now(),
+                hash_token(token.token),
+                token.family_id,
+                token.principal_id,
+                token.client_id,
+                token.resource,
+                token.scope,
+                token.status.value,
+                token.expires_at.isoformat(),
+                _now(),
             ),
         )
         self._conn.commit()
@@ -219,18 +254,36 @@ class TokenRepository:
             raise AuthError("invalid_grant", "refresh_token bulunamadi.")
         stored = _refresh_from_row(row)
         if stored.status is not RefreshTokenStatus.ACTIVE:
-            self._conn.execute(
-                "UPDATE refresh_token SET status = ? WHERE family_id = ? AND status != ?",
-                (RefreshTokenStatus.REVOKED.value, stored.family_id, RefreshTokenStatus.REVOKED.value),
+            self.revoke_family(stored.family_id)
+            raise AuthError(
+                "invalid_grant", "refresh_token yeniden kullanilmis; oturum ailesi iptal edildi."
             )
-            self._conn.commit()
-            raise AuthError("invalid_grant", "refresh_token yeniden kullanilmis; oturum ailesi iptal edildi.")
 
         outcome = rotate_refresh_token(stored, now=now)
-        self._conn.execute(
-            "UPDATE refresh_token SET status = ?, rotated_at = ? WHERE token_hash = ?",
-            (RefreshTokenStatus.ROTATED.value, now.isoformat(), token_hash),
+
+        # The SELECT above is only advisory -- this conditional UPDATE is what actually
+        # provides exclusivity (same pattern as AuthorizationCodeRepository.claim's
+        # ``WHERE consumed_at IS NULL``). Without the ``AND status = ?`` guard, two
+        # concurrent rotate() calls on the same still-active token could both pass the
+        # advisory check above and then both unconditionally overwrite the row, silently
+        # minting two independent valid sibling tokens from a single reused refresh
+        # token instead of the second one being detected as reuse (todo.md 3.4).
+        cursor = self._conn.execute(
+            "UPDATE refresh_token SET status = ?, rotated_at = ? "
+            "WHERE token_hash = ? AND status = ?",
+            (
+                RefreshTokenStatus.ROTATED.value,
+                now.isoformat(),
+                token_hash,
+                RefreshTokenStatus.ACTIVE.value,
+            ),
         )
+        if cursor.rowcount == 0:
+            self.revoke_family(stored.family_id)
+            raise AuthError(
+                "invalid_grant", "refresh_token yeniden kullanilmis; oturum ailesi iptal edildi."
+            )
+
         self.save_refresh(outcome.refresh_token)
         self.save_access(outcome.access_token)
         return outcome
@@ -261,7 +314,7 @@ class TokenRepository:
 
 def _refresh_from_row(row: sqlite3.Row) -> RefreshToken:
     return RefreshToken(
-        token="",
+        token="",  # nosec B106 -- placeholder; only the hash is persisted, raw value never stored
         family_id=row["family_id"],
         principal_id=row["principal_id"],
         client_id=row["client_id"],

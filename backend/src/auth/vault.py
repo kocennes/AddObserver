@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Protocol
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -29,16 +29,19 @@ class VaultClient(Protocol):
 
     def store(self, secret: str) -> str:
         """Persist ``secret`` and return an opaque reference (never the secret itself)."""
+        ...
 
     def read(self, vault_ref: str) -> str:
         """Return the secret for a reference, or raise ``VaultError`` if revoked/unknown."""
+        ...
 
     def revoke(self, vault_ref: str) -> None:
         """Permanently destroy the secret behind a reference."""
+        ...
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class LocalEncryptedVault:

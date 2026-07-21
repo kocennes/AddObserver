@@ -4,23 +4,27 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from backend.src.auth.web_session import hash_token
 from backend.src.db.connection import connect
 from backend.src.db.repository import PrincipalRepository
 from backend.src.db.web_session_store import WebLoginStateRepository, WebSessionRepository
 
-NOW = datetime(2026, 7, 17, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 17, 12, 0, 0, tzinfo=UTC)
 
 
 class WebLoginStateRepositoryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.conn = connect(":memory:")
         self.states = WebLoginStateRepository(self.conn)
+
+    def tearDown(self) -> None:
+        self.conn.close()
 
     def test_claim_succeeds_once(self) -> None:
         self.states.create("raw-state-1", NOW + timedelta(minutes=10))
@@ -29,7 +33,8 @@ class WebLoginStateRepositoryTests(unittest.TestCase):
         self.assertEqual(expires_at, NOW + timedelta(minutes=10))
 
     def test_duplicate_claim_is_reported_as_already_consumed(self) -> None:
-        """Zorunlu vaka: login state tek kullanımlıktır -- ikinci redeem denemesi fail-closed olmalı."""
+        """Zorunlu vaka: login state tek kullanımlıktır -- ikinci redeem denemesi fail-closed
+        olmalı."""
         self.states.create("raw-state-1", NOW + timedelta(minutes=10))
         self.states.claim("raw-state-1")
         already_consumed, _ = self.states.claim("raw-state-1")
@@ -45,6 +50,9 @@ class WebSessionRepositoryTests(unittest.TestCase):
         self.principals = PrincipalRepository(self.conn)
         self.sessions = WebSessionRepository(self.conn)
 
+    def tearDown(self) -> None:
+        self.conn.close()
+
     def test_create_and_lookup_round_trip(self) -> None:
         principal = self.principals.get_or_create("https://accounts.google.com", "google-sub-1")
         expires_at = NOW + timedelta(minutes=30)
@@ -53,14 +61,18 @@ class WebSessionRepositoryTests(unittest.TestCase):
 
         lookup = self.sessions.lookup("raw-token-1")
         self.assertEqual(lookup.principal_id, principal.id)
-        self.assertEqual(lookup.csrf_token, "raw-csrf-1")
+        self.assertEqual(lookup.csrf_token_hash, hash_token("raw-csrf-1"))
         self.assertEqual(lookup.expires_at, expires_at)
         self.assertFalse(lookup.revoked)
+        stored = self.conn.execute("SELECT token_hash, csrf_token_hash FROM web_session").fetchone()
+        self.assertEqual(stored["token_hash"], hash_token("raw-token-1"))
+        self.assertEqual(stored["csrf_token_hash"], hash_token("raw-csrf-1"))
+        self.assertNotEqual(stored["csrf_token_hash"], "raw-csrf-1")
 
     def test_lookup_of_unknown_token_is_fail_closed_shape(self) -> None:
         lookup = self.sessions.lookup("never-issued")
         self.assertIsNone(lookup.principal_id)
-        self.assertIsNone(lookup.csrf_token)
+        self.assertIsNone(lookup.csrf_token_hash)
         self.assertIsNone(lookup.expires_at)
         self.assertFalse(lookup.revoked)
 
@@ -72,7 +84,8 @@ class WebSessionRepositoryTests(unittest.TestCase):
         self.assertTrue(lookup.revoked)
 
     def test_two_principals_sessions_are_independent(self) -> None:
-        """İzolasyon: bir principal'in session token'ı başka principal'a çözülemez (farklı token = farklı satır)."""
+        """İzolasyon: bir principal'in session token'ı başka principal'a çözülemez (farklı
+        token = farklı satır)."""
         principal_a = self.principals.get_or_create("https://accounts.google.com", "google-sub-a")
         principal_b = self.principals.get_or_create("https://accounts.google.com", "google-sub-b")
         self.sessions.create(principal_a.id, "token-a", "csrf-a", NOW + timedelta(minutes=30))
@@ -86,6 +99,9 @@ class PrincipalRepositoryGetTests(unittest.TestCase):
     def setUp(self) -> None:
         self.conn = connect(":memory:")
         self.principals = PrincipalRepository(self.conn)
+
+    def tearDown(self) -> None:
+        self.conn.close()
 
     def test_get_returns_none_for_unknown_subject(self) -> None:
         """Login asla yeni principal yaratmaz -- yalnız get_or_create yaratır."""

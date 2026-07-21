@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -65,7 +66,9 @@ class _RecordingSend:
 class PrincipalAuthMiddlewareTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.conn = connect(":memory:")
-        self.principal = PrincipalRepository(self.conn).get_or_create("https://accounts.google.com", "sub-1")
+        self.principal = PrincipalRepository(self.conn).get_or_create(
+            "https://accounts.google.com", "sub-1"
+        )
         self.tokens = TokenRepository(self.conn)
 
     def _middleware(self, downstream) -> PrincipalAuthMiddleware:
@@ -76,8 +79,13 @@ class PrincipalAuthMiddlewareTests(unittest.IsolatedAsyncioTestCase):
             protected_resource_metadata_url=METADATA_URL,
         )
 
-    def _save_token(self, raw_token: str, *, resource: str = EXPECTED_RESOURCE, expired: bool = False) -> None:
-        expires_at = datetime.now(timezone.utc) + (timedelta(minutes=-5) if expired else timedelta(hours=1))
+    def tearDown(self) -> None:
+        self.conn.close()
+
+    def _save_token(
+        self, raw_token: str, *, resource: str = EXPECTED_RESOURCE, expired: bool = False
+    ) -> None:
+        expires_at = datetime.now(UTC) + (timedelta(minutes=-5) if expired else timedelta(hours=1))
         self.tokens.save_access(
             AccessToken(
                 token=raw_token,
@@ -170,6 +178,62 @@ class PrincipalAuthMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         await middleware({"type": "lifespan"}, _empty_receive, _RecordingSend())
 
         self.assertTrue(called["downstream"])
+
+    async def test_postgres_auth_transaction_closes_before_downstream_tool_runs(self) -> None:
+        token = AccessToken(
+            token="",
+            principal_id=self.principal.id,
+            client_id="client-1",
+            resource=EXPECTED_RESOURCE,
+            scope="adwords",
+            expires_at=datetime.now(UTC) + timedelta(minutes=5),
+        )
+
+        class Tokens:
+            def get_access(self, raw_token: str) -> AccessToken | None:
+                return token if raw_token == "postgres-token" else None
+
+        class Work:
+            def __init__(self) -> None:
+                self.repositories = SimpleNamespace(tokens=Tokens())
+                self.bootstraps: list[str] = []
+                self.exited = False
+
+            def __enter__(self):  # noqa: ANN204
+                return self
+
+            def __exit__(self, exc_type, exc, traceback) -> None:  # noqa: ANN001
+                self.exited = True
+
+            def bootstrap_access_token(self, raw_token: str) -> str:
+                self.bootstraps.append(raw_token)
+                return token.principal_id
+
+        work = Work()
+
+        class Factory:
+            def request(self) -> Work:
+                return work
+
+        async def downstream(scope, receive, send):
+            self.assertTrue(work.exited, "DB transaction must close before any MCP tool runs")
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b""})
+
+        middleware = PrincipalAuthMiddleware(
+            downstream,
+            tokens_factory=lambda: self.tokens,
+            expected_resource=EXPECTED_RESOURCE,
+            protected_resource_metadata_url=METADATA_URL,
+            postgres_uow_factory=Factory(),  # pyright: ignore[reportArgumentType]
+        )
+        send = _RecordingSend()
+        headers = [(b"authorization", b"Bearer postgres-token")]
+
+        await middleware(_http_scope(headers=headers), _empty_receive, send)
+
+        self.assertEqual(send.status, 200)
+        self.assertEqual(work.bootstraps, ["postgres-token"])
 
 
 if __name__ == "__main__":

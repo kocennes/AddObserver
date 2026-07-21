@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any
 
 
 class ProposalStatus(StrEnum):
@@ -45,7 +46,7 @@ class ApprovalError(ValueError):
 def _utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ApprovalError("invalid_time", "Zaman timezone bilgisi içermelidir.")
-    return value.astimezone(timezone.utc)
+    return value.astimezone(UTC)
 
 
 def _freeze_payload(payload: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -95,7 +96,7 @@ class Proposal:
         customer_id: str,
         payload: Mapping[str, Any],
         expires_at: datetime,
-    ) -> "Proposal":
+    ) -> Proposal:
         """Create a draft while copying and hashing its caller-provided payload."""
         if not proposal_id or not principal_id or not customer_id:
             raise ApprovalError("missing_identity", "Öneri kimlik alanları boş olamaz.")

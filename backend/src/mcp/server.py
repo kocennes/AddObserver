@@ -1,4 +1,5 @@
-"""Assembles the auth-protected ``/mcp`` Streamable HTTP app (docs/MCP.md, docs/CONNECTOR_SUBMISSION.md).
+"""Assembles the auth-protected ``/mcp`` Streamable HTTP app (docs/MCP.md,
+docs/CONNECTOR_SUBMISSION.md).
 
 Single public endpoint, matching ``docs/CONNECTOR_SUBMISSION.md`` ("Tek public
 endpoint: https://<domain>/mcp, Streamable HTTP"). Auth is deliberately left
@@ -30,6 +31,7 @@ from ..api.reporting import GoogleAdsReportingClient
 from ..auth.vault import VaultClient
 from ..config import Settings
 from ..db.oauth_store import TokenRepository
+from ..db.postgres_uow import PostgresUnitOfWorkFactory
 from ..db.proposals import ProposalRepository
 from .auth_bridge import PrincipalAuthMiddleware
 from .proposals import register_proposal_tools
@@ -55,6 +57,7 @@ def build_mcp_server(
     conn: sqlite3.Connection,
     vault: VaultClient,
     reporting_client: GoogleAdsReportingClient | None = None,
+    postgres_uow_factory: PostgresUnitOfWorkFactory | None = None,
 ) -> FastMCP:
     """Build the ``FastMCP`` instance with every Faz 1 reporting and proposal tool registered.
 
@@ -79,13 +82,20 @@ def build_mcp_server(
         conn=conn,
         vault=vault,
         reporting_client=reporting_client or GoogleAdsReportingClient(),
+        postgres_uow_factory=postgres_uow_factory,
     )
     register_reporting_tools(mcp, tool_context)
     register_proposal_tools(mcp, tool_context, ProposalRepository(conn))
     return mcp
 
 
-def wrap_with_principal_auth(mcp: FastMCP, *, settings: Settings, conn: sqlite3.Connection) -> ASGIApp:
+def wrap_with_principal_auth(
+    mcp: FastMCP,
+    *,
+    settings: Settings,
+    conn: sqlite3.Connection,
+    postgres_uow_factory: PostgresUnitOfWorkFactory | None = None,
+) -> ASGIApp:
     """Return ``mcp``'s Streamable HTTP ASGI app behind the connector's own bearer-token check.
 
     Calling ``mcp.streamable_http_app()`` here (rather than in
@@ -94,10 +104,13 @@ def wrap_with_principal_auth(mcp: FastMCP, *, settings: Settings, conn: sqlite3.
     lifespan *after* calling this function, or the mounted app will 500 on
     every request (no running session manager to hand requests to).
     """
-    protected_resource_metadata_url = f"{settings.public_base_url.rstrip('/')}/.well-known/oauth-protected-resource"
+    protected_resource_metadata_url = (
+        f"{settings.public_base_url.rstrip('/')}/.well-known/oauth-protected-resource"
+    )
     return PrincipalAuthMiddleware(
         mcp.streamable_http_app(),
         tokens_factory=lambda: TokenRepository(conn),
         expected_resource=settings.mcp_resource_uri,
         protected_resource_metadata_url=protected_resource_metadata_url,
+        postgres_uow_factory=postgres_uow_factory,
     )

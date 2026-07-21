@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 
 from backend.src.auth.domain import AuthError
 from backend.src.auth.web_session import (
+    hash_token,
     issue_login_state,
     issue_web_session,
     redeem_login_state,
@@ -19,7 +20,7 @@ from backend.src.auth.web_session import (
     verify_web_session,
 )
 
-NOW = datetime(2026, 7, 17, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 17, 12, 0, 0, tzinfo=UTC)
 
 
 class LoginStateTests(unittest.TestCase):
@@ -34,7 +35,8 @@ class LoginStateTests(unittest.TestCase):
         redeem_login_state(already_consumed=False, expires_at=state.expires_at, now=NOW)
 
     def test_redeem_rejects_replay(self) -> None:
-        """Zorunlu vaka: login state tek kullanımlıktır -- ikinci redeem denemesi fail-closed olmalı."""
+        """Zorunlu vaka: login state tek kullanımlıktır -- ikinci redeem denemesi fail-closed
+        olmalı."""
         state = issue_login_state(now=NOW)
         with self.assertRaises(AuthError) as ctx:
             redeem_login_state(already_consumed=True, expires_at=state.expires_at, now=NOW)
@@ -61,25 +63,27 @@ class WebSessionTests(unittest.TestCase):
         session = issue_web_session("principal-1", now=NOW)
         verified = verify_web_session(
             principal_id=session.principal_id,
-            csrf_token=session.csrf_token,
+            csrf_token_hash=hash_token(session.csrf_token),
             expires_at=session.expires_at,
             revoked=False,
             now=NOW,
         )
         self.assertEqual(verified.principal_id, "principal-1")
-        self.assertEqual(verified.csrf_token, session.csrf_token)
+        self.assertEqual(verified.csrf_token_hash, hash_token(session.csrf_token))
 
     def test_verify_rejects_unknown_token(self) -> None:
         """Bir WebSessionRepository.lookup miss -- her alan None gelir."""
         with self.assertRaises(AuthError):
-            verify_web_session(principal_id=None, csrf_token=None, expires_at=None, revoked=False, now=NOW)
+            verify_web_session(
+                principal_id=None, csrf_token_hash=None, expires_at=None, revoked=False, now=NOW
+            )
 
     def test_verify_rejects_revoked_session(self) -> None:
         session = issue_web_session("principal-1", now=NOW)
         with self.assertRaises(AuthError):
             verify_web_session(
                 principal_id=session.principal_id,
-                csrf_token=session.csrf_token,
+                csrf_token_hash=hash_token(session.csrf_token),
                 expires_at=session.expires_at,
                 revoked=True,
                 now=NOW,
@@ -91,7 +95,7 @@ class WebSessionTests(unittest.TestCase):
         with self.assertRaises(AuthError):
             verify_web_session(
                 principal_id=session.principal_id,
-                csrf_token=session.csrf_token,
+                csrf_token_hash=hash_token(session.csrf_token),
                 expires_at=session.expires_at,
                 revoked=False,
                 now=later,
@@ -100,17 +104,17 @@ class WebSessionTests(unittest.TestCase):
 
 class CsrfTokenTests(unittest.TestCase):
     def test_matching_token_passes(self) -> None:
-        verify_csrf_token("token-value", "token-value")
+        verify_csrf_token("token-value", hash_token("token-value"))
 
     def test_missing_token_fails_closed(self) -> None:
         with self.assertRaises(AuthError):
-            verify_csrf_token(None, "token-value")
+            verify_csrf_token(None, hash_token("token-value"))
         with self.assertRaises(AuthError):
-            verify_csrf_token("", "token-value")
+            verify_csrf_token("", hash_token("token-value"))
 
     def test_mismatched_token_fails_closed(self) -> None:
         with self.assertRaises(AuthError):
-            verify_csrf_token("wrong-value", "token-value")
+            verify_csrf_token("wrong-value", hash_token("token-value"))
 
 
 if __name__ == "__main__":

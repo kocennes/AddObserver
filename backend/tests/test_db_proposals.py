@@ -7,9 +7,10 @@ indirgendiğini doğrular (TESTING.md "Zorunlu güvenlik vakaları" madde 3 ve 8
 
 from __future__ import annotations
 
+import sqlite3
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -18,6 +19,7 @@ sys.path.insert(0, str(ROOT))
 from backend.src.approval import (
     Decision,
     Proposal,
+    ProposalStatus,
     approve_proposal,
     reserve_execution,
     submit_proposal,
@@ -39,10 +41,11 @@ class ProposalPersistenceTests(unittest.TestCase):
         self.principals = PrincipalRepository(self.conn)
         self.proposals = ProposalRepository(self.conn)
         self.approvals = ApprovalRepository(self.conn)
+        self.audit = AuditRepository(self.conn)
         self.executions = ExecutionRepository(self.conn)
         self.principal_a = self.principals.get_or_create("iss", "user-a")
         self.principal_b = self.principals.get_or_create("iss", "user-b")
-        self.now = datetime(2026, 7, 17, 12, tzinfo=timezone.utc)
+        self.now = datetime(2026, 7, 17, 12, tzinfo=UTC)
         self.payload = {"type": "campaign_budget_update", "after": {"amount_micros": 5_000_000}}
 
     def tearDown(self) -> None:
@@ -58,6 +61,23 @@ class ProposalPersistenceTests(unittest.TestCase):
         )
         return submit_proposal(draft, now=self.now)
 
+    def _pending_proposal_with(
+        self,
+        *,
+        proposal_id: str,
+        principal_id: str | None = None,
+        customer_id: str = "1234567890",
+        expires_at: datetime | None = None,
+    ) -> Proposal:
+        draft = Proposal.create(
+            proposal_id=proposal_id,
+            principal_id=principal_id or self.principal_a.id,
+            customer_id=customer_id,
+            payload=self.payload,
+            expires_at=expires_at or self.now + timedelta(minutes=30),
+        )
+        return submit_proposal(draft, now=self.now)
+
     def test_round_trip_preserves_hash_and_payload(self) -> None:
         pending = self._pending_proposal()
         self.proposals.save(pending)
@@ -70,6 +90,88 @@ class ProposalPersistenceTests(unittest.TestCase):
         """IDOR koruması: başka principal'ın proposal'ı görünmez."""
         self.proposals.save(self._pending_proposal())
         self.assertIsNone(self.proposals.get(self.principal_b.id, "proposal-1"))
+
+    def test_list_pending_scopes_filters_and_limits_results(self) -> None:
+        first = self._pending_proposal_with(proposal_id="proposal-1", customer_id="1234567890")
+        second = self._pending_proposal_with(proposal_id="proposal-2", customer_id="2222222222")
+        other = self._pending_proposal_with(
+            proposal_id="proposal-3", principal_id=self.principal_b.id
+        )
+        self.proposals.save(first)
+        self.proposals.save(second)
+        self.proposals.save(other)
+
+        listed = self.proposals.list_pending(self.principal_a.id, limit=1, now=self.now)
+        self.assertEqual([proposal.proposal_id for proposal in listed.proposals], ["proposal-1"])
+        self.assertTrue(listed.has_more)
+
+        filtered = self.proposals.list_pending(
+            self.principal_a.id, customer_id="2222222222", now=self.now
+        )
+        self.assertEqual([proposal.proposal_id for proposal in filtered.proposals], ["proposal-2"])
+        self.assertFalse(filtered.has_more)
+
+    def test_list_pending_hides_rows_that_expired_after_submission(self) -> None:
+        fresh = self._pending_proposal_with(proposal_id="proposal-1")
+        expired = self._pending_proposal_with(
+            proposal_id="proposal-2",
+            expires_at=self.now + timedelta(minutes=1),
+        )
+        self.proposals.save(fresh)
+        self.proposals.save(expired)
+
+        listed = self.proposals.list_pending(
+            self.principal_a.id, now=self.now + timedelta(minutes=2)
+        )
+        self.assertEqual([proposal.proposal_id for proposal in listed.proposals], ["proposal-1"])
+        stored_expired = self.proposals.get(self.principal_a.id, "proposal-2")
+        self.assertEqual(stored_expired.status.value, "pending_approval")
+
+    def test_list_pending_rejects_invalid_limit(self) -> None:
+        with self.assertRaisesRegex(ValueError, "pozitif"):
+            self.proposals.list_pending(self.principal_a.id, limit=0)
+        with self.assertRaisesRegex(ValueError, "en fazla"):
+            self.proposals.list_pending(self.principal_a.id, limit=101)
+        with self.assertRaisesRegex(ValueError, "timezone"):
+            self.proposals.list_pending(self.principal_a.id, now=datetime(2026, 7, 17, 12))
+
+    def test_list_pending_rejects_partial_keyset_position(self) -> None:
+        with self.assertRaisesRegex(ValueError, "after_created_at ve after_id"):
+            self.proposals.list_pending(
+                self.principal_a.id, after_created_at="2026-07-17T12:00:00+00:00"
+            )
+        with self.assertRaisesRegex(ValueError, "after_created_at ve after_id"):
+            self.proposals.list_pending(self.principal_a.id, after_id="some-id")
+
+    def test_list_pending_keyset_pagination_never_skips_or_repeats_a_row(self) -> None:
+        """Resuming from a page's last position (never an offset) walks every row exactly
+        once -- docs/API_DESIGN.md "Pagination sozlesmesi" (todo.md 1.5)."""
+        self.proposals.save(self._pending_proposal_with(proposal_id="proposal-1"))
+        self.proposals.save(self._pending_proposal_with(proposal_id="proposal-2"))
+        self.proposals.save(self._pending_proposal_with(proposal_id="proposal-3"))
+
+        first_page = self.proposals.list_pending(self.principal_a.id, limit=2, now=self.now)
+        self.assertEqual(
+            [proposal.proposal_id for proposal in first_page.proposals],
+            ["proposal-1", "proposal-2"],
+        )
+        self.assertTrue(first_page.has_more)
+        self.assertIsNotNone(first_page.last_created_at)
+        self.assertIsNotNone(first_page.last_id)
+
+        second_page = self.proposals.list_pending(
+            self.principal_a.id,
+            limit=2,
+            after_created_at=first_page.last_created_at,
+            after_id=first_page.last_id,
+            now=self.now,
+        )
+        self.assertEqual(
+            [proposal.proposal_id for proposal in second_page.proposals], ["proposal-3"]
+        )
+        self.assertFalse(second_page.has_more)
+        self.assertIsNone(second_page.last_created_at)
+        self.assertIsNone(second_page.last_id)
 
     def test_cross_principal_save_cannot_modify_existing_proposal(self) -> None:
         """A colliding external id cannot become a cross-principal write primitive."""
@@ -103,26 +205,237 @@ class ProposalPersistenceTests(unittest.TestCase):
         self.assertEqual(original.customer_id, loaded.customer_id)
         self.assertEqual(original.proposal_hash, loaded.proposal_hash)
 
+    def test_same_scope_save_cannot_replace_proposal_payload(self) -> None:
+        original = self._pending_proposal()
+        self.proposals.save(original)
+        changed = submit_proposal(
+            Proposal.create(
+                proposal_id=original.proposal_id,
+                principal_id=self.principal_a.id,
+                customer_id=original.customer_id,
+                payload={"type": "campaign_budget_update", "after": {"amount_micros": 9_000_000}},
+                expires_at=original.expires_at,
+            ),
+            now=self.now,
+        )
+
+        with self.assertRaisesRegex(ValueError, "payload/hash"):
+            self.proposals.save(changed)
+
+        loaded = self.proposals.get(self.principal_a.id, original.proposal_id)
+        self.assertEqual(original.proposal_hash, loaded.proposal_hash)
+        self.assertEqual(dict(original.payload), dict(loaded.payload))
+
     def test_save_after_approval_updates_status(self) -> None:
         pending = self._pending_proposal()
         self.proposals.save(pending)
         executing, approval = approve_proposal(
-            pending, principal_id=self.principal_a.id, approver_id=self.principal_a.id,
-            decision=Decision.APPROVE, now=self.now,
+            pending,
+            principal_id=self.principal_a.id,
+            approver_id=self.principal_a.id,
+            decision=Decision.APPROVE,
+            now=self.now,
         )
         self.proposals.save(executing)
         self.approvals.save(approval)
 
-        self.assertEqual(self.proposals.get(self.principal_a.id, "proposal-1").status, executing.status)
+        self.assertEqual(
+            self.proposals.get(self.principal_a.id, "proposal-1").status, executing.status
+        )
         latest = self.approvals.get_latest(self.principal_a.id, "proposal-1")
         self.assertEqual(latest.decision, Decision.APPROVE)
+
+    def test_save_decision_with_audit_is_atomic(self) -> None:
+        pending = self._pending_proposal()
+        self.proposals.save(pending)
+        approved, approval = approve_proposal(
+            pending,
+            principal_id=self.principal_a.id,
+            approver_id=self.principal_a.id,
+            decision=Decision.APPROVE,
+            now=self.now,
+        )
+        approval_id = self.approvals.save_decision_with_audit(
+            approved,
+            approval,
+            AuditEvent(
+                event_id="evt-approval-1",
+                occurred_at=self.now,
+                actor=self.principal_a.id,
+                principal_id=self.principal_a.id,
+                customer_id=approved.customer_id,
+                event_type="approval.decided",
+                proposal_id=approved.proposal_id,
+                approval_id=None,
+                execution_id=None,
+                outcome=Decision.APPROVE.value,
+                reason_code=None,
+                correlation_id="corr-approval-1",
+                google_request_id=None,
+            ),
+        )
+
+        self.assertEqual(
+            self.proposals.get(self.principal_a.id, "proposal-1").status, approved.status
+        )
+        latest = self.approvals.get_latest(self.principal_a.id, "proposal-1")
+        assert latest is not None
+        self.assertEqual(latest.decision, Decision.APPROVE)
+        events = self.audit.list_for_principal(self.principal_a.id)
+        self.assertEqual(events[0].event_type, "approval.decided")
+        self.assertEqual(events[0].approval_id, approval_id)
+        self.assertEqual(events[0].correlation_id, "corr-approval-1")
+
+    def test_save_decision_with_audit_rolls_back_on_audit_failure(self) -> None:
+        pending = self._pending_proposal()
+        self.proposals.save(pending)
+        self.audit.insert(
+            AuditEvent(
+                event_id="evt-duplicate",
+                occurred_at=self.now,
+                actor=self.principal_a.id,
+                principal_id=self.principal_a.id,
+                customer_id=pending.customer_id,
+                event_type="seed",
+                proposal_id=None,
+                approval_id=None,
+                execution_id=None,
+                outcome="ok",
+                reason_code=None,
+                correlation_id="corr-seed",
+                google_request_id=None,
+            )
+        )
+        approved, approval = approve_proposal(
+            pending,
+            principal_id=self.principal_a.id,
+            approver_id=self.principal_a.id,
+            decision=Decision.APPROVE,
+            now=self.now,
+        )
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.approvals.save_decision_with_audit(
+                approved,
+                approval,
+                AuditEvent(
+                    event_id="evt-duplicate",
+                    occurred_at=self.now,
+                    actor=self.principal_a.id,
+                    principal_id=self.principal_a.id,
+                    customer_id=approved.customer_id,
+                    event_type="approval.decided",
+                    proposal_id=approved.proposal_id,
+                    approval_id=None,
+                    execution_id=None,
+                    outcome=Decision.APPROVE.value,
+                    reason_code=None,
+                    correlation_id="corr-approval-1",
+                    google_request_id=None,
+                ),
+            )
+
+        self.assertEqual(
+            self.proposals.get(self.principal_a.id, "proposal-1").status,
+            ProposalStatus.PENDING_APPROVAL,
+        )
+        self.assertIsNone(self.approvals.get_latest(self.principal_a.id, "proposal-1"))
+
+    def test_save_decision_with_audit_cannot_advance_tampered_payload_hash(self) -> None:
+        pending = self._pending_proposal()
+        self.proposals.save(pending)
+        tampered_pending = submit_proposal(
+            Proposal.create(
+                proposal_id=pending.proposal_id,
+                principal_id=self.principal_a.id,
+                customer_id=pending.customer_id,
+                payload={"type": "campaign_budget_update", "after": {"amount_micros": 9_000_000}},
+                expires_at=pending.expires_at,
+            ),
+            now=self.now,
+        )
+        tampered_approved, tampered_approval = approve_proposal(
+            tampered_pending,
+            principal_id=self.principal_a.id,
+            approver_id=self.principal_a.id,
+            decision=Decision.APPROVE,
+            now=self.now,
+        )
+
+        with self.assertRaisesRegex(ValueError, "hash"):
+            self.approvals.save_decision_with_audit(
+                tampered_approved,
+                tampered_approval,
+                AuditEvent(
+                    event_id="evt-tampered",
+                    occurred_at=self.now,
+                    actor=self.principal_a.id,
+                    principal_id=self.principal_a.id,
+                    customer_id=tampered_approved.customer_id,
+                    event_type="approval.decided",
+                    proposal_id=tampered_approved.proposal_id,
+                    approval_id=None,
+                    execution_id=None,
+                    outcome=Decision.APPROVE.value,
+                    reason_code=None,
+                    correlation_id="corr-tampered",
+                    google_request_id=None,
+                ),
+            )
+
+        self.assertEqual(
+            self.proposals.get(self.principal_a.id, pending.proposal_id).status,
+            ProposalStatus.PENDING_APPROVAL,
+        )
+        self.assertIsNone(self.approvals.get_latest(self.principal_a.id, pending.proposal_id))
+
+    def test_save_decision_with_audit_rejects_mismatched_audit_event(self) -> None:
+        pending = self._pending_proposal()
+        self.proposals.save(pending)
+        approved, approval = approve_proposal(
+            pending,
+            principal_id=self.principal_a.id,
+            approver_id=self.principal_a.id,
+            decision=Decision.APPROVE,
+            now=self.now,
+        )
+
+        with self.assertRaisesRegex(ValueError, "approval karari"):
+            self.approvals.save_decision_with_audit(
+                approved,
+                approval,
+                AuditEvent(
+                    event_id="evt-approval-1",
+                    occurred_at=self.now,
+                    actor=self.principal_a.id,
+                    principal_id=self.principal_a.id,
+                    customer_id=approved.customer_id,
+                    event_type="approval.decided",
+                    proposal_id=approved.proposal_id,
+                    approval_id=None,
+                    execution_id=None,
+                    outcome=Decision.REJECT.value,
+                    reason_code=None,
+                    correlation_id="corr-approval-1",
+                    google_request_id=None,
+                ),
+            )
+
+        self.assertEqual(
+            self.proposals.get(self.principal_a.id, "proposal-1").status,
+            ProposalStatus.PENDING_APPROVAL,
+        )
+        self.assertIsNone(self.approvals.get_latest(self.principal_a.id, "proposal-1"))
 
     def test_approval_not_visible_to_other_principal(self) -> None:
         pending = self._pending_proposal()
         self.proposals.save(pending)
         _, approval = approve_proposal(
-            pending, principal_id=self.principal_a.id, approver_id=self.principal_a.id,
-            decision=Decision.APPROVE, now=self.now,
+            pending,
+            principal_id=self.principal_a.id,
+            approver_id=self.principal_a.id,
+            decision=Decision.APPROVE,
+            now=self.now,
         )
         self.approvals.save(approval)
         self.assertIsNone(self.approvals.get_latest(self.principal_b.id, "proposal-1"))
@@ -131,8 +444,11 @@ class ProposalPersistenceTests(unittest.TestCase):
         pending = self._pending_proposal()
         self.proposals.save(pending)
         _, approval = approve_proposal(
-            pending, principal_id=self.principal_a.id, approver_id=self.principal_a.id,
-            decision=Decision.APPROVE, now=self.now,
+            pending,
+            principal_id=self.principal_a.id,
+            approver_id=self.principal_a.id,
+            decision=Decision.APPROVE,
+            now=self.now,
         )
         foreign = type(approval)(
             proposal_id=approval.proposal_id,
@@ -152,13 +468,20 @@ class ProposalPersistenceTests(unittest.TestCase):
         pending = self._pending_proposal()
         self.proposals.save(pending)
         approved, approval = approve_proposal(
-            pending, principal_id=self.principal_a.id, approver_id=self.principal_a.id,
-            decision=Decision.APPROVE, now=self.now,
+            pending,
+            principal_id=self.principal_a.id,
+            approver_id=self.principal_a.id,
+            decision=Decision.APPROVE,
+            now=self.now,
         )
         self.approvals.save(approval)
         _, reservation = reserve_execution(
-            approved, approval, principal_id=self.principal_a.id,
-            current_payload=self.payload, idempotency_key="request-1", now=self.now,
+            approved,
+            approval,
+            principal_id=self.principal_a.id,
+            current_payload=self.payload,
+            idempotency_key="request-1",
+            now=self.now,
         )
         first = self.executions.record(reservation, before="{}", after="{}")
         second = self.executions.record(reservation, before="{}", after="{}")
@@ -170,18 +493,28 @@ class ProposalPersistenceTests(unittest.TestCase):
         pending = self._pending_proposal()
         self.proposals.save(pending)
         approved, approval = approve_proposal(
-            pending, principal_id=self.principal_a.id, approver_id=self.principal_a.id,
-            decision=Decision.APPROVE, now=self.now,
+            pending,
+            principal_id=self.principal_a.id,
+            approver_id=self.principal_a.id,
+            decision=Decision.APPROVE,
+            now=self.now,
         )
         _, reservation = reserve_execution(
-            approved, approval, principal_id=self.principal_a.id,
-            current_payload=self.payload, idempotency_key="shared-key", now=self.now,
+            approved,
+            approval,
+            principal_id=self.principal_a.id,
+            current_payload=self.payload,
+            idempotency_key="shared-key",
+            now=self.now,
         )
         self.executions.record(reservation, before="{}", after="{}")
         foreign = type(reservation)(
-            proposal_id=reservation.proposal_id, principal_id=self.principal_b.id,
-            customer_id=reservation.customer_id, proposal_hash=reservation.proposal_hash,
-            idempotency_key=reservation.idempotency_key, reserved_at=reservation.reserved_at,
+            proposal_id=reservation.proposal_id,
+            principal_id=self.principal_b.id,
+            customer_id=reservation.customer_id,
+            proposal_hash=reservation.proposal_hash,
+            idempotency_key=reservation.idempotency_key,
+            reserved_at=reservation.reserved_at,
         )
         with self.assertRaisesRegex(ValueError, "principal"):
             self.executions.record(foreign, before="{}", after="{}")
@@ -190,17 +523,27 @@ class ProposalPersistenceTests(unittest.TestCase):
         pending = self._pending_proposal()
         self.proposals.save(pending)
         approved, approval = approve_proposal(
-            pending, principal_id=self.principal_a.id, approver_id=self.principal_a.id,
-            decision=Decision.APPROVE, now=self.now,
+            pending,
+            principal_id=self.principal_a.id,
+            approver_id=self.principal_a.id,
+            decision=Decision.APPROVE,
+            now=self.now,
         )
         _, reservation = reserve_execution(
-            approved, approval, principal_id=self.principal_a.id,
-            current_payload=self.payload, idempotency_key="foreign-first-use", now=self.now,
+            approved,
+            approval,
+            principal_id=self.principal_a.id,
+            current_payload=self.payload,
+            idempotency_key="foreign-first-use",
+            now=self.now,
         )
         foreign = type(reservation)(
-            proposal_id=reservation.proposal_id, principal_id=self.principal_b.id,
-            customer_id=reservation.customer_id, proposal_hash=reservation.proposal_hash,
-            idempotency_key=reservation.idempotency_key, reserved_at=reservation.reserved_at,
+            proposal_id=reservation.proposal_id,
+            principal_id=self.principal_b.id,
+            customer_id=reservation.customer_id,
+            proposal_hash=reservation.proposal_hash,
+            idempotency_key=reservation.idempotency_key,
+            reserved_at=reservation.reserved_at,
         )
 
         with self.assertRaisesRegex(ValueError, "proposal ve principal"):
@@ -211,17 +554,27 @@ class ProposalPersistenceTests(unittest.TestCase):
         pending = self._pending_proposal()
         self.proposals.save(pending)
         approved, approval = approve_proposal(
-            pending, principal_id=self.principal_a.id, approver_id=self.principal_a.id,
-            decision=Decision.APPROVE, now=self.now,
+            pending,
+            principal_id=self.principal_a.id,
+            approver_id=self.principal_a.id,
+            decision=Decision.APPROVE,
+            now=self.now,
         )
         _, reservation = reserve_execution(
-            approved, approval, principal_id=self.principal_a.id,
-            current_payload=self.payload, idempotency_key="stale-snapshot", now=self.now,
+            approved,
+            approval,
+            principal_id=self.principal_a.id,
+            current_payload=self.payload,
+            idempotency_key="stale-snapshot",
+            now=self.now,
         )
         stale = type(reservation)(
-            proposal_id=reservation.proposal_id, principal_id=reservation.principal_id,
-            customer_id="9999999999", proposal_hash=reservation.proposal_hash,
-            idempotency_key=reservation.idempotency_key, reserved_at=reservation.reserved_at,
+            proposal_id=reservation.proposal_id,
+            principal_id=reservation.principal_id,
+            customer_id="9999999999",
+            proposal_hash=reservation.proposal_hash,
+            idempotency_key=reservation.idempotency_key,
+            reserved_at=reservation.reserved_at,
         )
 
         with self.assertRaisesRegex(ValueError, "proposal snapshot"):
@@ -232,13 +585,20 @@ class ProposalPersistenceTests(unittest.TestCase):
         pending = self._pending_proposal()
         self.proposals.save(pending)
         approved, approval = approve_proposal(
-            pending, principal_id=self.principal_a.id, approver_id=self.principal_a.id,
-            decision=Decision.APPROVE, now=self.now,
+            pending,
+            principal_id=self.principal_a.id,
+            approver_id=self.principal_a.id,
+            decision=Decision.APPROVE,
+            now=self.now,
         )
         self.approvals.save(approval)
         _, reservation = reserve_execution(
-            approved, approval, principal_id=self.principal_a.id,
-            current_payload=self.payload, idempotency_key="request-2", now=self.now,
+            approved,
+            approval,
+            principal_id=self.principal_a.id,
+            current_payload=self.payload,
+            idempotency_key="request-2",
+            now=self.now,
         )
         claim = self.executions.record(reservation, before="{}", after="{}")
         self.executions.mark_result(
@@ -254,12 +614,19 @@ class ProposalPersistenceTests(unittest.TestCase):
         pending = self._pending_proposal()
         self.proposals.save(pending)
         approved, approval = approve_proposal(
-            pending, principal_id=self.principal_a.id, approver_id=self.principal_a.id,
-            decision=Decision.APPROVE, now=self.now,
+            pending,
+            principal_id=self.principal_a.id,
+            approver_id=self.principal_a.id,
+            decision=Decision.APPROVE,
+            now=self.now,
         )
         _, reservation = reserve_execution(
-            approved, approval, principal_id=self.principal_a.id,
-            current_payload=self.payload, idempotency_key="scoped-result", now=self.now,
+            approved,
+            approval,
+            principal_id=self.principal_a.id,
+            current_payload=self.payload,
+            idempotency_key="scoped-result",
+            now=self.now,
         )
         claim = self.executions.record(reservation, before="{}", after="{}")
 
@@ -291,7 +658,7 @@ class AuditAppendOnlyTests(unittest.TestCase):
     def test_insert_and_list_round_trip(self) -> None:
         event = AuditEvent(
             event_id="evt-1",
-            occurred_at=datetime.now(timezone.utc),
+            occurred_at=datetime.now(UTC),
             actor="system",
             principal_id="principal-1",
             customer_id="1234567890",
@@ -311,13 +678,26 @@ class AuditAppendOnlyTests(unittest.TestCase):
 
     def test_events_scoped_to_principal(self) -> None:
         for principal_id, event_id in (("principal-1", "evt-1"), ("principal-2", "evt-2")):
-            self.audit.insert(AuditEvent(
-                event_id=event_id, occurred_at=datetime.now(timezone.utc), actor="system",
-                principal_id=principal_id, customer_id=None, event_type="proposal.created",
-                proposal_id=None, approval_id=None, execution_id=None, outcome="success", reason_code=None,
-                correlation_id="corr", google_request_id=None,
-            ))
-        self.assertEqual([e.event_id for e in self.audit.list_for_principal("principal-1")], ["evt-1"])
+            self.audit.insert(
+                AuditEvent(
+                    event_id=event_id,
+                    occurred_at=datetime.now(UTC),
+                    actor="system",
+                    principal_id=principal_id,
+                    customer_id=None,
+                    event_type="proposal.created",
+                    proposal_id=None,
+                    approval_id=None,
+                    execution_id=None,
+                    outcome="success",
+                    reason_code=None,
+                    correlation_id="corr",
+                    google_request_id=None,
+                )
+            )
+        self.assertEqual(
+            [e.event_id for e in self.audit.list_for_principal("principal-1")], ["evt-1"]
+        )
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -48,20 +48,36 @@ class FailingCompletionAudit:
 class ApprovalApplicationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.conn = connect(":memory:")
-        now = datetime(2026, 7, 17, 12, tzinfo=timezone.utc)
+        now = datetime(2026, 7, 17, 12, tzinfo=UTC)
         self.conn.execute(
-            "INSERT INTO principal (id, issuer, subject, status, created_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO principal (id, issuer, subject, status, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
             ("principal-a", "issuer", "subject", "active", now.isoformat()),
         )
         self.conn.execute(
-            "INSERT INTO proposal (id, principal_id, customer_id, payload, proposal_hash, status, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            ("proposal-1", "principal-a", "1234567890", "{}", "hash", "executing", now.isoformat(), now.isoformat()),
+            "INSERT INTO proposal "
+            "(id, principal_id, customer_id, payload, proposal_hash, status, expires_at, "
+            "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "proposal-1",
+                "principal-a",
+                "1234567890",
+                "{}",
+                "hash",
+                "executing",
+                now.isoformat(),
+                now.isoformat(),
+            ),
         )
         self.conn.commit()
         self.executions = ExecutionRepository(self.conn)
         self.reservation = ExecutionReservation(
-            proposal_id="proposal-1", principal_id="principal-a", customer_id="1234567890",
-            proposal_hash="hash", idempotency_key="idem-1", reserved_at=now,
+            proposal_id="proposal-1",
+            principal_id="principal-a",
+            customer_id="1234567890",
+            proposal_hash="hash",
+            idempotency_key="idem-1",
+            reserved_at=now,
         )
 
     def tearDown(self) -> None:
@@ -69,9 +85,15 @@ class ApprovalApplicationTests(unittest.TestCase):
 
     def _execute(self, adapter, audit=None):
         return execute_reserved_mutation(
-            self.reservation, payload={"type": "budget"}, before_json="{}", after_json="{}",
-            actor="principal-a", correlation_id="corr-1", executions=self.executions,
-            audit=audit or AuditRepository(self.conn), adapter=adapter,
+            self.reservation,
+            payload={"type": "budget"},
+            before_json="{}",
+            after_json="{}",
+            actor="principal-a",
+            correlation_id="corr-1",
+            executions=self.executions,
+            audit=audit or AuditRepository(self.conn),
+            adapter=adapter,
         )
 
     def test_audit_failure_prevents_mutation(self) -> None:
@@ -96,7 +118,9 @@ class ApprovalApplicationTests(unittest.TestCase):
             "SELECT event_type, outcome, google_request_id, execution_id "
             "FROM audit_event ORDER BY occurred_at"
         ).fetchall()
-        self.assertEqual(["execution.started", "execution.completed"], [row["event_type"] for row in rows])
+        self.assertEqual(
+            ["execution.started", "execution.completed"], [row["event_type"] for row in rows]
+        )
         self.assertEqual("request-1", rows[-1]["google_request_id"])
         self.assertIsNotNone(rows[0]["execution_id"])
         self.assertEqual(rows[0]["execution_id"], rows[1]["execution_id"])
@@ -151,14 +175,11 @@ class ApprovalApplicationTests(unittest.TestCase):
         adapter = FakeAdapter(MutationOutcome(ExecutionStatus.PENDING, "request-pending"))
         with self.assertRaisesRegex(ValueError, "terminal bir mutation sonucu"):
             self._execute(adapter)
-        execution = self.conn.execute(
-            "SELECT status, google_request_id FROM execution"
-        ).fetchone()
+        execution = self.conn.execute("SELECT status, google_request_id FROM execution").fetchone()
         self.assertEqual(ExecutionStatus.UNKNOWN.value, execution["status"])
         self.assertEqual("request-pending", execution["google_request_id"])
         completion = self.conn.execute(
-            "SELECT outcome, reason_code FROM audit_event "
-            "WHERE event_type = 'execution.completed'"
+            "SELECT outcome, reason_code FROM audit_event WHERE event_type = 'execution.completed'"
         ).fetchone()
         self.assertEqual(ExecutionStatus.UNKNOWN.value, completion["outcome"])
         self.assertEqual("invalid_adapter_outcome", completion["reason_code"])

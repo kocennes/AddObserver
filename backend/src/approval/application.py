@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Mapping, Protocol
+from datetime import UTC, datetime
+from typing import Any, Protocol
 
 from ..db.models import AuditEvent, ExecutionStatus
 from .domain import ExecutionReservation
@@ -37,15 +38,15 @@ class MutationAdapter(Protocol):
         self, reservation: ExecutionReservation, payload: Mapping[str, Any]
     ) -> MutationOutcome:
         """Apply one already-approved mutation and return its classified outcome."""
+        ...
 
 
 class ExecutionStore(Protocol):
     """Persistence operations required by the execution application service."""
 
-    def record(
-        self, reservation: ExecutionReservation, before: str, after: str
-    ) -> ExecutionClaim:
+    def record(self, reservation: ExecutionReservation, before: str, after: str) -> ExecutionClaim:
         """Atomically claim a reservation or return its existing result."""
+        ...
 
     def mark_result(
         self,
@@ -55,6 +56,7 @@ class ExecutionStore(Protocol):
         google_request_id: str | None,
     ) -> None:
         """Persist the classified provider result within its principal scope."""
+        ...
 
 
 class AuditStore(Protocol):
@@ -62,6 +64,7 @@ class AuditStore(Protocol):
 
     def insert(self, event: AuditEvent) -> None:
         """Append an audit event or raise when persistence is unavailable."""
+        ...
 
 
 def execute_reserved_mutation(
@@ -115,7 +118,9 @@ def execute_reserved_mutation(
     try:
         outcome = adapter.apply(reservation, payload)
     except Exception as error:
-        executions.mark_result(reservation.principal_id, execution_id, ExecutionStatus.UNKNOWN, None)
+        executions.mark_result(
+            reservation.principal_id, execution_id, ExecutionStatus.UNKNOWN, None
+        )
         try:
             audit.insert(
                 _audit_event(
@@ -138,7 +143,10 @@ def execute_reserved_mutation(
         ExecutionStatus.UNKNOWN,
     }:
         executions.mark_result(
-            reservation.principal_id, execution_id, ExecutionStatus.UNKNOWN, outcome.google_request_id
+            reservation.principal_id,
+            execution_id,
+            ExecutionStatus.UNKNOWN,
+            outcome.google_request_id,
         )
         audit.insert(
             _audit_event(
@@ -172,7 +180,10 @@ def execute_reserved_mutation(
         )
     except Exception:
         executions.mark_result(
-            reservation.principal_id, execution_id, ExecutionStatus.UNKNOWN, outcome.google_request_id
+            reservation.principal_id,
+            execution_id,
+            ExecutionStatus.UNKNOWN,
+            outcome.google_request_id,
         )
         raise
     return outcome
@@ -191,7 +202,7 @@ def _audit_event(
 ) -> AuditEvent:
     return AuditEvent(
         event_id=str(uuid.uuid4()),
-        occurred_at=datetime.now(timezone.utc),
+        occurred_at=datetime.now(UTC),
         actor=actor,
         principal_id=reservation.principal_id,
         customer_id=reservation.customer_id,

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import sys
+import tempfile
+import threading
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -14,8 +16,6 @@ from backend.src.auth.domain import (
     AuthError,
     AuthorizationTransaction,
     ClientIdentity,
-    RefreshToken,
-    RefreshTokenStatus,
     compute_code_challenge,
     consent_transaction,
     issue_authorization_code,
@@ -30,7 +30,7 @@ from backend.src.db.oauth_store import (
 )
 from backend.src.db.repository import PrincipalRepository
 
-NOW = datetime(2026, 7, 17, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 17, 12, 0, 0, tzinfo=UTC)
 MCP_RESOURCE = "https://mcp.example.com/mcp"
 CLIENT = ClientIdentity(
     client_id="https://claude.ai/oauth/hosted-client-metadata",
@@ -51,6 +51,7 @@ def _make_transaction(transaction_id: str = "txn-1") -> tuple[str, Authorization
         expected_resource=MCP_RESOURCE,
         scope="adwords",
         client_state="client-state",
+        consent_csrf_hash="test-consent-csrf-hash",
         now=NOW,
     )
     return verifier, txn
@@ -200,6 +201,55 @@ class TokenRepositoryTests(unittest.TestCase):
     def test_unknown_refresh_token_raises(self) -> None:
         with self.assertRaises(AuthError):
             self.tokens.rotate("never-issued", now=NOW)
+
+
+class ConcurrentAuthorizationCodeClaimTests(unittest.TestCase):
+    """Zorunlu vaka (todo.md 3.3): iki eşzamanlı ``/token`` isteği aynı
+    ``authorization_code``'u redeem etmeye çalışırsa yalnız biri başarılı olmalı.
+
+    ``AuthContext.conn`` üretimde tek bir thread'e bağlıdır (``auth/server.py``'nin
+    modül docstring'i), bu yüzden gerçek bir race'i tetiklemek için burada aynı
+    dosya-tabanlı sqlite DB'sine iki *bağımsız* ``sqlite3.Connection`` (her biri kendi
+    thread'inde) açılır -- ``AuthorizationCodeRepository.claim``'in tek atomiklik
+    garantisi olan ``UPDATE ... WHERE consumed_at IS NULL`` ifadesi budur.
+    """
+
+    def test_concurrent_redemption_of_the_same_code_only_succeeds_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "race.db"
+            setup_conn = connect(str(db_path))
+            principal = PrincipalRepository(setup_conn).get_or_create(
+                "https://accounts.google.com", "google-sub-race"
+            )
+            _, txn = _make_transaction("txn-race")
+            AuthorizationTransactionRepository(setup_conn).save(txn)
+            consented = consent_transaction(txn, now=NOW)
+            code = issue_authorization_code(consented, principal_id=principal.id, now=NOW)
+            AuthorizationCodeRepository(setup_conn).save(code)
+            setup_conn.close()
+
+            results: list[bool] = []
+            results_lock = threading.Lock()
+            start_barrier = threading.Barrier(2)
+
+            def _attempt_claim() -> None:
+                conn = connect(str(db_path))
+                conn.execute("PRAGMA busy_timeout = 5000")
+                try:
+                    start_barrier.wait()
+                    _, already_consumed = AuthorizationCodeRepository(conn).claim(code.code)
+                finally:
+                    conn.close()
+                with results_lock:
+                    results.append(already_consumed)
+
+            threads = [threading.Thread(target=_attempt_claim) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        self.assertEqual(sorted(results), [False, True])
 
 
 if __name__ == "__main__":
