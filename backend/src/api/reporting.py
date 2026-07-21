@@ -164,11 +164,11 @@ _AD_GROUP_ROW_GETTERS: dict[str, Callable[[GoogleAdsRow], Any]] = {
 }
 
 _KEYWORD_ROW_GETTERS: dict[str, Callable[[GoogleAdsRow], Any]] = {
-    "date": lambda row: row.segments.date,
+    "date": lambda row: row.segments.date or None,
     "campaign_id": lambda row: str(row.campaign.id),
     "ad_group_id": lambda row: str(row.ad_group.id),
     "criterion_id": lambda row: str(row.ad_group_criterion.criterion_id),
-    "keyword_text": lambda row: row.ad_group_criterion.keyword.text,
+    "keyword_text": lambda row: row.ad_group_criterion.keyword.text or None,
     "keyword_match_type": lambda row: row.ad_group_criterion.keyword.match_type.name,
     "keyword_status": lambda row: row.ad_group_criterion.status.name,
     "impressions": lambda row: row.metrics.impressions,

@@ -1131,11 +1131,21 @@ Bir madde ancak aşağıdakilerin tamamı sağlandığında işaretlenir:
   direct hesapta gönderilmediğini kanıtlar. Principal/customer cross-ownership reddi ve account'a bağlı
   login customer çözümlemesi ortak kapıda `backend/tests/test_mcp_credentials.py` ile kapsanır.
 
-- [ ] **5.4 Keyword reporting contract'ını tamamla**
+- [x] **5.4 Keyword reporting contract'ını tamamla**
 
   Prompt: Keyword performance alanları, match type, status ve metrik eşlemesini tamamla. Keyword/ad
   metnini untrusted data olarak ele al; loglama ve prompt-instruction olarak yorumlama. Multi-page,
   injection-benzeri içerik, hata ve ownership testleri ekle.
+
+  Tamamlanma kanıtı (2026-07-22): `backend/src/api/queries.py` `keyword_view` sorgusunu sabit on bir
+  alanlık allowlist ve doğrulanmış tarih penceresiyle üretir; raw GAQL kabul etmez.
+  `backend/src/api/reporting.py` keyword text/date null, match type/status enum ve micros/numeric
+  eşlemelerini ortak güvenli reporting standardına getirir. `backend/tests/test_api_reporting.py`
+  success + exact allowlist, empty page, caller-paced multi-page, exact micros, `UNKNOWN` match/status,
+  null, quota, timeout ve non-retryable auth vakalarını resmî v24 proto/exception tipleriyle kapsar.
+  `backend/tests/test_prompt_injection_safety.py` injection-benzeri keyword metninin adapter ve gerçek MCP
+  protokolünde yalnız `keyword_text` içinde verbatim/opak veri kaldığını ve çağrı kapsamını değiştirmediğini
+  kanıtlar. Cross-principal ownership ve manager login-customer ortak credential kapısı/testleriyle korunur.
 
 - [ ] **5.5 Reporting pagination ve response limitlerini uygula**
 

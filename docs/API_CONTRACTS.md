@@ -106,6 +106,20 @@ payload kabul etmez; yalnız önceden doğrulanmış proposal ID uygular.
   bağlar. Manager üzerinden erişimde bu değer resmî Google Ads client konfigürasyonuna aynen aktarılır;
   doğrudan erişilen hesapta alan hiç gönderilmez.
 
+### Keyword performance read sözleşmesi
+
+- Sabit GAQL allowlist'i `keyword_view` kaynağından yalnız `segments.date`, campaign/ad group/criterion
+  ID'leri, `ad_group_criterion.keyword.text/match_type`, criterion status ve dört asgari metriği seçer.
+  Ham GAQL veya dinamik alan adı kabul edilmez.
+- Match type (`BROAD`/`EXACT`/`PHRASE`) ve status resmî proto enum adıyla taşınır; response-only
+  `UNKNOWN` kayıpsız korunur. Eksik keyword text/date `null`, numeric scalar'lar `0`, enum varsayılanları
+  `UNSPECIFIED` olarak eşlenir; micros integer kalır.
+- Keyword/ad metni güvenilmeyen dış veridir: komut, rol veya tool argümanı olarak ayrıştırılmaz; yalnız
+  allowlist içindeki `keyword_text` alanında verbatim döner. İçeriği customer/principal kapsamını,
+  yapılandırılmış tool argümanlarını veya insan-onayı durumunu değiştiremez.
+- Campaign/ad group ile aynı ownership, manager login-customer, caller-paced continuation ve
+  quota/timeout/auth hata sözleşmesini kullanır.
+
 ## Öneri şeması — asgari alanlar
 
 ```json
@@ -140,6 +154,10 @@ biri olabilir; `campaign_id` en fazla 19 haneli (`int64`) sayısal bir kimlik ol
 - Public MCP dışında ayrı kullanıcı-facing HTTP API yayınlanıp yayınlanmayacağı.
 
 ## Güncelleme geçmişi
+
+- 2026-07-22 — Keyword performance allowlist/eşleme sözleşmesi tamamlandı; match type/status,
+  success/empty/multi-page/micros/enum/null/quota/timeout/auth, principal ownership ve injection-benzeri
+  metnin adapter + gerçek MCP üzerinden opak veri kalması contract testleriyle sabitlendi.
 
 - 2026-07-22 — Ad group performance allowlist/eşleme sözleşmesi campaign standardıyla hizalandı;
   manager/direct `login_customer_id`, success/empty/multi-page/micros/enum/null/quota/timeout/auth ve

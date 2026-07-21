@@ -93,6 +93,25 @@ def _ad_group_row(*, ad_group_id: int, name: str, clicks: int) -> GoogleAdsRow:
     )
 
 
+def _keyword_row(*, criterion_id: int, text: str, clicks: int) -> GoogleAdsRow:
+    return GoogleAdsRow(
+        campaign=campaign.Campaign(id=111),
+        ad_group=ad_group.AdGroup(id=222),
+        ad_group_criterion=ad_group_criterion.AdGroupCriterion(
+            criterion_id=criterion_id,
+            status=ad_group_criterion_status_enum.AdGroupCriterionStatusEnum.AdGroupCriterionStatus.ENABLED,
+            keyword=criteria.KeywordInfo(
+                text=text,
+                match_type=keyword_match_type_enum.KeywordMatchTypeEnum.KeywordMatchType.EXACT,
+            ),
+        ),
+        segments=segments_types.Segments(date="2026-07-01"),
+        metrics=metrics_types.Metrics(
+            impressions=5, clicks=clicks, cost_micros=500, conversions=1.0
+        ),
+    )
+
+
 class GoogleAdsReportingClientCampaignTests(unittest.TestCase):
     def setUp(self) -> None:
         self.date_range = DateRange(start=date(2026, 7, 1), end=date(2026, 7, 10))
@@ -541,22 +560,7 @@ class GoogleAdsReportingClientAdGroupAndKeywordTests(unittest.TestCase):
         self.assertEqual(len(service.calls), 1)
 
     def test_keyword_performance_maps_narrow_rows(self) -> None:
-        row = GoogleAdsRow(
-            campaign=campaign.Campaign(id=111),
-            ad_group=ad_group.AdGroup(id=222),
-            ad_group_criterion=ad_group_criterion.AdGroupCriterion(
-                criterion_id=333,
-                status=ad_group_criterion_status_enum.AdGroupCriterionStatusEnum.AdGroupCriterionStatus.ENABLED,
-                keyword=criteria.KeywordInfo(
-                    text="google ads danismanligi",
-                    match_type=keyword_match_type_enum.KeywordMatchTypeEnum.KeywordMatchType.EXACT,
-                ),
-            ),
-            segments=segments_types.Segments(date="2026-07-01"),
-            metrics=metrics_types.Metrics(
-                impressions=5, clicks=1, cost_micros=500, conversions=1.0
-            ),
-        )
+        row = _keyword_row(criterion_id=333, text="google ads danismanligi", clicks=1)
         service = FakeGoogleAdsSearchService(
             pages_by_token={None: SearchGoogleAdsResponse(results=[row], next_page_token="")}
         )
@@ -568,6 +572,135 @@ class GoogleAdsReportingClientAdGroupAndKeywordTests(unittest.TestCase):
         self.assertEqual(result.rows[0]["keyword_text"], "google ads danismanligi")
         self.assertEqual(result.rows[0]["keyword_match_type"], "EXACT")
         self.assertEqual(result.rows[0]["criterion_id"], "333")
+        self.assertEqual(result.rows[0]["keyword_status"], "ENABLED")
+        self.assertEqual(
+            set(result.rows[0]),
+            {
+                "date",
+                "campaign_id",
+                "ad_group_id",
+                "criterion_id",
+                "keyword_text",
+                "keyword_match_type",
+                "keyword_status",
+                "impressions",
+                "clicks",
+                "cost_micros",
+                "conversions",
+            },
+        )
+
+    def test_keyword_empty_page_has_stable_shape(self) -> None:
+        service = FakeGoogleAdsSearchService(
+            pages_by_token={None: SearchGoogleAdsResponse(results=[], next_page_token="")}
+        )
+        client = GoogleAdsReportingClient(search_service_factory=lambda creds: service)
+
+        result = client.get_keyword_performance(
+            customer_id="1234567890", credentials=_credentials(), date_range=self.date_range
+        )
+
+        self.assertEqual(result.rows, ())
+        self.assertIsNone(result.next_page_token)
+
+    def test_keyword_pages_are_caller_paced(self) -> None:
+        service = FakeGoogleAdsSearchService(
+            pages_by_token={
+                None: SearchGoogleAdsResponse(
+                    results=[_keyword_row(criterion_id=333, text="A", clicks=1)],
+                    next_page_token="page-2",
+                ),
+                "page-2": SearchGoogleAdsResponse(
+                    results=[_keyword_row(criterion_id=444, text="B", clicks=2)],
+                    next_page_token="",
+                ),
+            }
+        )
+        client = GoogleAdsReportingClient(search_service_factory=lambda creds: service)
+
+        first = client.get_keyword_performance(
+            customer_id="1234567890", credentials=_credentials(), date_range=self.date_range
+        )
+        self.assertEqual(len(service.calls), 1)
+        second = client.get_keyword_performance(
+            customer_id="1234567890",
+            credentials=_credentials(),
+            date_range=self.date_range,
+            page_token=first.next_page_token,
+        )
+
+        self.assertEqual(first.rows[0]["criterion_id"], "333")
+        self.assertEqual(second.rows[0]["criterion_id"], "444")
+        self.assertEqual([call["page_token"] for call in service.calls], [None, "page-2"])
+
+    def test_keyword_preserves_micros_unknown_enums_and_missing_strings(self) -> None:
+        row = GoogleAdsRow(
+            campaign=campaign.Campaign(id=111),
+            ad_group=ad_group.AdGroup(id=222),
+            ad_group_criterion=ad_group_criterion.AdGroupCriterion(
+                criterion_id=333,
+                status=ad_group_criterion_status_enum.AdGroupCriterionStatusEnum.AdGroupCriterionStatus.UNKNOWN,
+                keyword=criteria.KeywordInfo(
+                    match_type=keyword_match_type_enum.KeywordMatchTypeEnum.KeywordMatchType.UNKNOWN,
+                ),
+            ),
+            metrics=metrics_types.Metrics(cost_micros=9_007_199_254_740_991),
+        )
+        service = FakeGoogleAdsSearchService(
+            pages_by_token={None: SearchGoogleAdsResponse(results=[row])}
+        )
+        client = GoogleAdsReportingClient(search_service_factory=lambda creds: service)
+
+        result = client.get_keyword_performance(
+            customer_id="1234567890", credentials=_credentials(), date_range=self.date_range
+        )
+
+        mapped = result.rows[0]
+        self.assertEqual(mapped["cost_micros"], 9_007_199_254_740_991)
+        self.assertEqual(mapped["keyword_match_type"], "UNKNOWN")
+        self.assertEqual(mapped["keyword_status"], "UNKNOWN")
+        self.assertIsNone(mapped["keyword_text"])
+        self.assertIsNone(mapped["date"])
+
+    def test_keyword_quota_failure_is_classified(self) -> None:
+        service = FakeGoogleAdsSearchService(raises=core_exceptions.ResourceExhausted("quota"))
+        client = GoogleAdsReportingClient(
+            search_service_factory=lambda creds: service,
+            retry_policy=RetryPolicy(max_attempts=1),
+        )
+
+        with self.assertRaises(AdsApiError) as caught:
+            client.get_keyword_performance(
+                customer_id="1234567890", credentials=_credentials(), date_range=self.date_range
+            )
+        self.assertEqual(caught.exception.error_class, ErrorClass.RATE_LIMIT)
+
+    def test_keyword_timeout_failure_is_classified(self) -> None:
+        service = FakeGoogleAdsSearchService(raises=core_exceptions.DeadlineExceeded("timeout"))
+        client = GoogleAdsReportingClient(
+            search_service_factory=lambda creds: service,
+            retry_policy=RetryPolicy(max_attempts=1),
+        )
+
+        with self.assertRaises(AdsApiError) as caught:
+            client.get_keyword_performance(
+                customer_id="1234567890", credentials=_credentials(), date_range=self.date_range
+            )
+        self.assertEqual(caught.exception.error_class, ErrorClass.TRANSIENT)
+
+    def test_keyword_auth_failure_is_not_retried(self) -> None:
+        service = FakeGoogleAdsSearchService(raises=core_exceptions.Unauthenticated("revoked"))
+        client = GoogleAdsReportingClient(
+            search_service_factory=lambda creds: service,
+            retry_policy=RetryPolicy(max_attempts=3),
+        )
+
+        with self.assertRaises(AdsApiError) as caught:
+            client.get_keyword_performance(
+                customer_id="1234567890", credentials=_credentials(), date_range=self.date_range
+            )
+        self.assertEqual(caught.exception.error_class, ErrorClass.AUTH)
+        self.assertEqual(len(service.calls), 1)
 
 
 if __name__ == "__main__":
