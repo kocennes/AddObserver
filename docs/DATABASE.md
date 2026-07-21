@@ -76,6 +76,11 @@ uygulayabilecek somut bir veritabanı yaklaşımına dönüştürmek.
 
 ## Güncelleme geçmişi
 
+- 2026-07-22 — Connector Google callback'in production kalıcılaştırma adımı tek
+  principal-bound unit-of-work'e alındı. Credential metadata, client grant, authorization code ve
+  transaction completion birlikte commit/rollback olur; Google/vault çağrıları açık DB
+  transaction'ı içinde çalışmaz.
+
 - 2026-07-19 — ADR-0007 ile disconnect DB–vault atomiklik boşluğu için credential revocation outbox kabul
   edildi; migration principal RLS, composite credential ownership ve credential başına tek iş constraint'i
   kurar. Repository atomik/idempotent enqueue ile principal-scoped lease/retry/completion davranışını ekler;

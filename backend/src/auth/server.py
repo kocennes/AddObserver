@@ -17,7 +17,7 @@ from __future__ import annotations
 import secrets
 import uuid
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from html import escape
 from urllib.parse import urlencode, urlsplit
@@ -276,6 +276,9 @@ async def google_callback(
             "İşlem bulunamadı", "Google geri çağrısı bilinmeyen bir işlem içeriyor.", 400
         )
 
+    if context.postgres_uow_factory is not None:
+        return await _postgres_google_callback(state, code=code, error=error, context=context)
+
     transactions = AuthorizationTransactionRepository(context.conn)
     transaction = transactions.get(state)
     if transaction is None:
@@ -332,6 +335,87 @@ async def google_callback(
 
     query = urlencode({"code": auth_code.code, "state": transaction.client_state})
     return RedirectResponse(url=f"{transaction.redirect_uri}?{query}", status_code=302)
+
+
+async def _postgres_google_callback(
+    state: str,
+    *,
+    code: str | None,
+    error: str | None,
+    context: AuthContext,
+) -> Response:
+    """Complete connector Google OAuth using short PostgreSQL transactions.
+
+    Transaction lookup finishes before the Google and vault calls. After the
+    verified Google subject and opaque vault reference exist, one principal-bound
+    transaction atomically persists credential metadata, client consent, the
+    single-use connector code and the completed authorization transaction.
+    """
+    factory = context.postgres_uow_factory
+    assert factory is not None  # nosec B101 - guarded by google_callback
+
+    with factory.request() as lookup_work:
+        if lookup_work.repositories is None:
+            raise RuntimeError("PostgreSQL unit of work repository'leri kurulmadi")
+        transaction = lookup_work.repositories.authorization_transactions.get(state)
+
+    if transaction is None:
+        return await handle_web_login_callback(state, code=code, error=error, context=context)
+
+    if error is not None or code is None:
+        query = urlencode({"error": "access_denied", "state": transaction.client_state})
+        return RedirectResponse(url=f"{transaction.redirect_uri}?{query}", status_code=302)
+
+    try:
+        google_result = context.google_client.exchange_code(code=code)
+    except Exception:  # noqa: BLE001 -- never expose upstream details
+        query = urlencode({"error": "server_error", "state": transaction.client_state})
+        return RedirectResponse(url=f"{transaction.redirect_uri}?{query}", status_code=302)
+
+    if (
+        google_result.granted_scopes is not None
+        and "https://www.googleapis.com/auth/adwords" not in google_result.granted_scopes
+    ):
+        query = urlencode({"error": "access_denied", "state": transaction.client_state})
+        return RedirectResponse(url=f"{transaction.redirect_uri}?{query}", status_code=302)
+
+    try:
+        vault_ref = context.vault.store(google_result.refresh_token)
+    except Exception:  # noqa: BLE001 -- vault provider details are sensitive
+        query = urlencode({"error": "server_error", "state": transaction.client_state})
+        return RedirectResponse(url=f"{transaction.redirect_uri}?{query}", status_code=302)
+
+    now = datetime.now(UTC)
+    try:
+        with factory.request() as persist_work:
+            repositories = persist_work.repositories
+            if repositories is None:
+                raise RuntimeError("PostgreSQL unit of work repository'leri kurulmadi")
+
+            current = repositories.authorization_transactions.get(state)
+            if current is None:
+                raise AuthError("invalid_request", "Yetkilendirme islemi bulunamadi.")
+            principal = repositories.principals.get_or_create(
+                "https://accounts.google.com", google_result.google_subject
+            )
+            persist_work.bind_principal(principal.id)
+
+            auth_code = issue_authorization_code(current, principal_id=principal.id, now=now)
+            completed = complete_transaction(current, now=now)
+            repositories.credentials.upsert(principal.id, vault_ref, key_version=1)
+            repositories.client_grants.record_consent(
+                principal.id, current.client_id, current.scope
+            )
+            repositories.authorization_transactions.save(completed)
+            repositories.authorization_codes.save(auth_code)
+    except Exception:  # noqa: BLE001 -- rollback is handled by the unit of work
+        with suppress(Exception):  # vault provider details must not escape
+            context.vault.revoke(vault_ref)
+        query = urlencode({"error": "server_error", "state": transaction.client_state})
+        return RedirectResponse(url=f"{transaction.redirect_uri}?{query}", status_code=302)
+
+    query = urlencode({"code": auth_code.code, "state": current.client_state})
+    return RedirectResponse(url=f"{current.redirect_uri}?{query}", status_code=302)
 
 
 # ---------------------------------------------------------------------------

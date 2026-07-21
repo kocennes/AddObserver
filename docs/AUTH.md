@@ -235,6 +235,13 @@ kriteri de karşılar; audit_event append-only kaldığı için asla silinmez (`
 
 ## Güncelleme geçmişi
 
+- 2026-07-22 — Connector `/google/callback` production PostgreSQL yoluna taşındı. Authorization
+  transaction ilk kısa transaction'da okunup kapatılır; Google code exchange ve vault store DB
+  transaction'ı dışında yürür. Doğrulanmış Google subject sonrasında ikinci transaction
+  principal RLS context'ini bağlar ve credential metadata, client consent, authorization code ile
+  `consented → completed` geçişini atomik kaydeder. Kalıcılaştırma rollback olursa yeni vault
+  referansı best-effort revoke edilir ve provider/DB ayrıntısı OAuth cevabına taşınmaz.
+
 - 2026-07-19 — Connector `/authorize` transaction oluşturma ile `/authorize/consent` okuma ve consent durum
   ilerletme işlemleri PostgreSQL production yolunda kısa unit-of-work transaction'ları kullanır. Consent
   okuma+CSRF doğrulama+`pending → consented` compare-and-set geçişi tek transaction'da atomiktir.

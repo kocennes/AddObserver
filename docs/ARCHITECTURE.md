@@ -75,6 +75,11 @@ Connector Authorization Server                    ▼
 
 ## Güncelleme geçmişi
 
+- 2026-07-22 — Connector Google callback PostgreSQL composition'a iki kısa transaction olarak
+  bağlandı: ilk transaction authorization state'i okur, ikinci transaction doğrulanmış principal
+  context'inde credential/grant/code/completion kayıtlarını atomik yazar. Google ve vault egress'i
+  iki transaction arasında gerçekleşir; rollback yeni vault referansını geri iptal etmeyi dener.
+
 - 2026-07-19 — `/authorize` transaction oluşturma ve `/authorize/consent` transaction okuma/durum
   ilerletme işlemleri production composition'da kısa PostgreSQL unit-of-work sınırlarına taşındı. Consent
   okuma ve compare-and-set durum ilerletme aynı transaction içinde atomiktir.

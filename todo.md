@@ -1002,6 +1002,12 @@ Bir madde ancak aşağıdakilerin tamamı sağlandığında işaretlenir:
   `pending → consented → completed` geçişlerini predecessor koşullu compare-and-set ile uygular. Stale
   contract testi ve iki-connection canlı PostgreSQL consent yarışı testi eklendi; canlı kanıt DSN olmadığı
   için skip kalır.
+  Connector `/google/callback` de production PostgreSQL yoluna taşındı: transaction lookup Google
+  exchange'den önce kapanır, Google ve vault çağrıları DB dışında yürür; ikinci kısa
+  principal-bound unit-of-work credential metadata, client consent, authorization code ve completion'ı
+  atomik yazar. Kalıcılaştırma rollback'inde yeni vault referansı revoke edilir. Transaction sırası,
+  RLS bind ve rollback cleanup contract testleri eklendi. Faz 4.3 canlı PostgreSQL kanıtı ve kalan
+  production startup/secrets-manager bileşimi tamamlanana kadar açık kalır.
 
 - [ ] **4.4 Repository transaction ve concurrency güvenliğini tamamla**
 
