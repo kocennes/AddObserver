@@ -196,6 +196,12 @@ Kod, test, ilgili belge, migration/rollback ve gözlemlenebilirlik birlikte tesl
 
 ## Güncelleme geçmişi
 
+- 2026-07-22 — `test_api_accounts.py`, `ListAccessibleCustomers` ve manager `customer_client`
+  hiyerarşisi için mock contract kapısı ekledi. Doğrudan/alt hesap `login_customer_id` eşlemesi,
+  deduplikasyon, bozuk provider resource name reddi, principal-scoped persistence, cross-principal
+  credential izolasyonu ve disconnect sonrası aynı satırın re-link edilmesi test edilir; raw token
+  adapter sonucuna girmez.
+
 - 2026-07-19 — Connector authorization transaction repository seçimi için production PostgreSQL
   unit-of-work lifecycle ve hata rollback contract testleri eklendi (`test_postgres_authorize_routes.py`).
   Repository contract stale consent geçişini reddeder; opsiyonel canlı PostgreSQL suite iki connection/barrier

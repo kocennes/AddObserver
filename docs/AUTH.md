@@ -81,11 +81,11 @@ vermesini sağlayan iki token düzlemini, confused-deputy korumasını ve revoke
 - Google consent başarılı olsa bile connector kendi consent ekranını atlamaz. Google refresh token şifreli
   per-principal secret; access token bellekte kısa ömürlüdür.
 - Google accessible customer ID listesi alınır ve kullanıcı seçimi principal ile bağlanır. `customer_id`
-  hiçbir zaman tek başına yetki kanıtı değildir. **Uygulama durumu:** bu, henüz yazılmamış bir
-  senkronizasyon adımıdır (`todo.md` 5.1, "Accessible accounts senkronizasyonunu tamamla" hâlâ
-  açık); `db/repository.py::AdsAccountRepository.link_account` bugün yalnız repository katmanında
-  var, hiçbir OAuth callback/production kod yolundan çağrılmıyor (yalnız test fixture'larında
-  elle çağrılıyor). Faz 3.5'in Google OAuth exchange testleri (`test_google_oauth.py`) bu yüzden
+  hiçbir zaman tek başına yetki kanıtı değildir. **Uygulama durumu:** doğrudan hesapları ve
+  manager `customer_client` hiyerarşisini keşfeden, `login_customer_id` eşlemesini koruyan adapter
+  ile principal-scoped senkronizasyon primitive'i `api/accounts.py` içinde uygulanmıştır. Ancak
+  kullanıcı seçim/onboarding yüzeyi henüz OAuth callback'e bağlı değildir (`todo.md` 5.1 açık);
+  keşfedilen hesapların tamamı otomatik bağlanmaz. Faz 3.5'in Google OAuth exchange testleri bu yüzden
   bu maddeyi kapsam dışı bıraktı -- henüz var olmayan bir davranış test edilemez.
 - Consent öncesi kullanıcıya Google hesabında 2SV gerekebileceği anlatılır. `TWO_STEP_VERIFICATION_NOT_ENROLLED`
   alındığında token/secret loglanmadan kurulum durdurulur, 2SV etkinleştirme ve yeniden bağlama yönlendirmesi verilir.

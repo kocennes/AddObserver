@@ -14,6 +14,12 @@ edilebilir veri sözleşmelerini tanımlamak.
 - Google Ads [API structure](https://developers.google.com/google-ads/api/docs/concepts/api-structure)
   `validate_only`; [mutate best practices](https://developers.google.com/google-ads/api/docs/mutating/best-practices)
   operasyon/response davranışını açıklar.
+- Google Ads [`ListAccessibleCustomers`](https://developers.google.com/google-ads/api/reference/rpc/v24/CustomerService/ListAccessibleCustomers)
+  yalnız kimliği doğrulanan kullanıcının doğrudan erişebildiği customer resource name'lerini
+  döndürür. Manager alt hesapları ayrı
+  [`customer_client`](https://developers.google.com/google-ads/api/fields/v24/customer_client)
+  hiyerarşi sorgusuyla keşfedilir; bu kaynak manager'ın kendisiyle tüm doğrudan/dolaylı
+  client'larını içerir.
 - Anthropic [review criteria](https://claude.com/docs/connectors/building/review-criteria) catch-all read/write
   tool'ları reddeder ve amaç-özel tool bekler.
 
@@ -64,6 +70,14 @@ payload kabul etmez; yalnız önceden doğrulanmış proposal ID uygular.
 - Güncel limitler için Google'ın [quota](https://developers.google.com/google-ads/api/docs/best-practices/quotas),
   [error handling](https://developers.google.com/google-ads/api/docs/get-started/handle-errors) ve
   [rate limit](https://developers.google.com/google-ads/api/docs/productionize/rate-limits) belgeleri izlenir.
+- Account discovery önce `CustomerService.ListAccessibleCustomers` ile doğrudan kökleri alır; her
+  kök için `customer_client` sorgusu manager hiyerarşisini genişletir. Provider'dan gelen resource
+  name/ID yalnız tam `customers/{10-digit-id}`/10 haneli biçimde kabul edilir. Alt hesap satırında
+  ilgili kök manager `login_customer_id` olarak saklanır; doğrudan manager olmayan hesapta değer
+  `null` kalır. Yinelenen alt hesap ilk doğrulanmış kök kapsamıyla deterministik tekilleştirilir.
+- Discovery credential'ı yalnız doğrulanmış `principal_id` için çözülür ve adapter sonucuna
+  token/secret girmez. Senkronizasyon yalnız aynı principal namespace'inde `link_account` çağırır;
+  daha önce disconnect edilmiş aynı customer satırını kimliğini değiştirmeden yeniden active yapar.
 
 ## Öneri şeması — asgari alanlar
 
@@ -99,6 +113,10 @@ biri olabilir; `campaign_id` en fazla 19 haneli (`int64`) sayısal bir kimlik ol
 - Public MCP dışında ayrı kullanıcı-facing HTTP API yayınlanıp yayınlanmayacağı.
 
 ## Güncelleme geçmişi
+
+- 2026-07-22 — Faz 5.1 accessible-account adapter'ı eklendi: doğrudan customer listesi, manager
+  `customer_client` hiyerarşisi, `login_customer_id` eşlemesi, ID doğrulama/deduplikasyon ve
+  principal-scoped re-link sözleşmesi uygulanıp mock contract testlerine bağlandı.
 
 - 2026-07-19 — Bearer HTTP API route'larının production veri erişimi PostgreSQL request unit-of-work
   sınırına bağlandı; exact token bootstrap ve principal-scoped sorgu aynı transaction içinde yürür.

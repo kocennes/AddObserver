@@ -10,6 +10,11 @@ absent until Google's RMF/Compliance classification closes
 ``docs/GOOGLE_API_ACCESS.md`` (still ``Taslak``).
 """
 
+from .accounts import (
+    DiscoveredAccount,
+    GoogleAdsAccountDiscoveryClient,
+    sync_discovered_accounts,
+)
 from .errors import AdsApiError, ErrorClass, classify_google_ads_exception, classify_transport_error
 from .problems import PROBLEM_JSON, problem_body, problem_response
 from .queries import DateRange
@@ -25,7 +30,9 @@ from .retry import RetryPolicy, execute_with_retry
 
 __all__ = [
     "AdsApiError",
+    "DiscoveredAccount",
     "ErrorClass",
+    "GoogleAdsAccountDiscoveryClient",
     "classify_google_ads_exception",
     "classify_transport_error",
     "PROBLEM_JSON",
@@ -40,4 +47,5 @@ __all__ = [
     "real_search_service_factory",
     "RetryPolicy",
     "execute_with_retry",
+    "sync_discovered_accounts",
 ]

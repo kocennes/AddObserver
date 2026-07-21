@@ -1085,6 +1085,19 @@ Bir madde ancak aşağıdakilerin tamamı sağlandığında işaretlenir:
   principal credential ownership, disconnected account ve re-link davranışını test et. Başka principal'ın
   credential'ını çözme veya raw token döndürme.
 
+  Kısmi ilerleme: `backend/src/api/accounts.py`, resmi `CustomerService.ListAccessibleCustomers`
+  doğrudan kök listesini ve her kök için `customer_client` manager hiyerarşisini dar, mock'lanabilir
+  gateway arkasında uygular. Tüm provider ID'leri 10 haneli customer contract'ıyla doğrulanır,
+  alt hesaplarda kök manager `login_customer_id` olarak korunur ve overlap deterministik tekilleştirilir.
+  `resolve_principal_google_ads_credentials` hesap satırı henüz yokken yalnız doğrulanmış
+  principal'ın aktif vault referansını çözer; başka principal'a fallback yoktur. Senkronizasyon
+  principal-scoped `link_account` ile disconnect edilmiş satırı aynı ID üzerinde yeniden active yapar.
+  `backend/tests/test_api_accounts.py` ve `test_mcp_credentials.py` direct/manager, invalid resource,
+  dedupe, ownership, no-secret-output, disconnected/re-link ve cross-principal vakalarını kapsar.
+  Madde açık kalır: `docs/AUTH.md` gereği keşfedilen hesaplar kullanıcıya seçim için
+  sunulmalı ve yalnız seçilen ID'ler connector callback/onboarding akışından bu senkronizasyon
+  primitive'ine verilmelidir; otomatik tüm-hesap bağlama yapılmaz.
+
 - [ ] **5.2 Campaign reporting contract'ını tamamla**
 
   Prompt: Campaign performance alan allowlist'ini ürün/RMF sözleşmesiyle karşılaştır. GAQL'i yalnız

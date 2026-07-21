@@ -21,6 +21,7 @@ from backend.src.db.repository import (
 from backend.src.mcp.credentials import (
     deactivate_credential_on_auth_failure,
     resolve_google_ads_credentials,
+    resolve_principal_google_ads_credentials,
 )
 from cryptography.fernet import Fernet
 
@@ -123,6 +124,39 @@ class ResolveGoogleAdsCredentialsTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "credential_unreadable")
         self.assertEqual(ctx.exception.error_class, ErrorClass.AUTH)
         self.assertNotIn("missing-vault-ref", ctx.exception.message)
+
+    def test_account_discovery_resolves_only_authenticated_principal_credential(self) -> None:
+        other = PrincipalRepository(self.conn).get_or_create("https://accounts.google.com", "sub-2")
+        other_ref = self.vault.store("other-refresh-token")
+        self.oauth_credentials.upsert(other.id, other_ref, key_version=1)
+        owner_ref = self.vault.store("owner-refresh-token")
+        self.oauth_credentials.upsert(self.principal.id, owner_ref, key_version=1)
+
+        credentials = resolve_principal_google_ads_credentials(
+            principal_id=self.principal.id,
+            settings=self.settings,
+            oauth_credentials=self.oauth_credentials,
+            vault=self.vault,
+        )
+
+        self.assertEqual(credentials.refresh_token, "owner-refresh-token")
+        self.assertNotEqual(credentials.refresh_token, "other-refresh-token")
+        self.assertIsNone(credentials.login_customer_id)
+
+    def test_account_discovery_cannot_fall_back_to_another_principals_credential(self) -> None:
+        other = PrincipalRepository(self.conn).get_or_create("https://accounts.google.com", "sub-2")
+        other_ref = self.vault.store("other-refresh-token")
+        self.oauth_credentials.upsert(other.id, other_ref, key_version=1)
+
+        with self.assertRaises(AdsApiError) as caught:
+            resolve_principal_google_ads_credentials(
+                principal_id=self.principal.id,
+                settings=self.settings,
+                oauth_credentials=self.oauth_credentials,
+                vault=self.vault,
+            )
+
+        self.assertEqual(caught.exception.code, "no_active_google_credential")
 
 
 class DeactivateCredentialOnAuthFailureTests(unittest.TestCase):

@@ -49,6 +49,40 @@ class GoogleAdsCredentialReference:
     login_customer_id: str | None
 
 
+def resolve_principal_google_ads_credentials(
+    *,
+    principal_id: str,
+    settings: Settings,
+    oauth_credentials: OAuthCredentialStore,
+    vault: VaultClient,
+) -> GoogleAdsCredentials:
+    """Resolve credentials for account discovery before any customer is linked.
+
+    The metadata lookup is explicitly scoped to the authenticated principal. No
+    account row is required because discovering those rows is the purpose of the
+    call; the returned credential carries no ``login_customer_id``.
+    """
+    credential = oauth_credentials.get_active(principal_id)
+    if credential is None:
+        raise AdsApiError(
+            error_class=ErrorClass.AUTH,
+            code="no_active_google_credential",
+            message=(
+                "Google hesabi bagli degil veya baglanti iptal edilmis; "
+                "yeniden baglanmaniz gerekiyor."
+            ),
+            request_id=None,
+        )
+    return materialize_google_ads_credentials(
+        reference=GoogleAdsCredentialReference(
+            vault_ref=credential.vault_ref,
+            login_customer_id=None,
+        ),
+        settings=settings,
+        vault=vault,
+    )
+
+
 def resolve_google_ads_credentials(
     *,
     principal_id: str,
