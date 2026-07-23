@@ -27,12 +27,14 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.types import ASGIApp
 
+from ..api.accounts import GoogleAdsAccountDiscoveryClient
 from ..api.reporting import GoogleAdsReportingClient
 from ..auth.vault import VaultClient
 from ..config import Settings
 from ..db.oauth_store import TokenRepository
 from ..db.postgres_uow import PostgresUnitOfWorkFactory
 from ..db.proposals import ProposalRepository
+from ..observability import JsonEventLogger, Telemetry
 from .auth_bridge import PrincipalAuthMiddleware
 from .proposals import register_proposal_tools
 from .tools import MCPToolContext, register_reporting_tools
@@ -56,14 +58,20 @@ def build_mcp_server(
     settings: Settings,
     conn: sqlite3.Connection,
     vault: VaultClient,
+    event_logger: JsonEventLogger,
+    telemetry: Telemetry | None = None,
     reporting_client: GoogleAdsReportingClient | None = None,
+    account_discovery_client: GoogleAdsAccountDiscoveryClient | None = None,
     postgres_uow_factory: PostgresUnitOfWorkFactory | None = None,
 ) -> FastMCP:
     """Build the ``FastMCP`` instance with every Faz 1 reporting and proposal tool registered.
 
-    ``reporting_client`` is injectable so tests can supply one backed by
-    ``FakeGoogleAdsSearchService`` instead of making real Google Ads calls
-    (docs/TESTING.md mock policy); production callers can omit it.
+    ``reporting_client``/``account_discovery_client`` are injectable so tests can
+    supply ones backed by fakes instead of making real Google Ads calls
+    (docs/TESTING.md mock policy); production callers can omit both. ``event_logger``
+    is the same instance ``create_app`` wires into ``ObservabilityMiddleware``, so a
+    Google Ads failure logged here (todo.md 5.6) shares one pseudonym key/event
+    stream with the rest of the app's structured logs.
     """
     mcp = FastMCP(
         name="AddObserver Google Ads",
@@ -82,6 +90,9 @@ def build_mcp_server(
         conn=conn,
         vault=vault,
         reporting_client=reporting_client or GoogleAdsReportingClient(),
+        event_logger=event_logger,
+        telemetry=telemetry or Telemetry(),
+        account_discovery_client=account_discovery_client or GoogleAdsAccountDiscoveryClient(),
         postgres_uow_factory=postgres_uow_factory,
     )
     register_reporting_tools(mcp, tool_context)

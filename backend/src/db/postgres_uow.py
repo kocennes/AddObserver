@@ -14,6 +14,7 @@ from types import TracebackType
 from sqlalchemy import Engine
 from sqlalchemy.engine import Connection
 
+from ..observability import Telemetry
 from .postgres_context import (
     bootstrap_access_token_principal,
     bootstrap_authorization_code_principal,
@@ -83,8 +84,10 @@ class PostgresRepositories:
 class PostgresRequestUnitOfWork(AbstractContextManager["PostgresRequestUnitOfWork"]):
     """Own one connection, transaction, RLS context and repository set."""
 
-    def __init__(self, engine: Engine):
+    def __init__(self, engine: Engine, telemetry: Telemetry | None = None):
         self._engine = engine
+        self._telemetry = telemetry or Telemetry()
+        self._telemetry_operation = None
         self._connection_context = None
         self._connection: Connection | None = None
         self._transaction = None
@@ -92,6 +95,8 @@ class PostgresRequestUnitOfWork(AbstractContextManager["PostgresRequestUnitOfWor
         self.repositories: PostgresRepositories | None = None
 
     def __enter__(self) -> PostgresRequestUnitOfWork:
+        self._telemetry_operation = self._telemetry.operation("db", "request_transaction")
+        self._telemetry_operation.__enter__()
         self._connection_context = self._engine.connect()
         self._connection = self._connection_context.__enter__()
         self._transaction = self._connection.begin()
@@ -150,6 +155,9 @@ class PostgresRequestUnitOfWork(AbstractContextManager["PostgresRequestUnitOfWor
             self._principal_bound = False
             self._connection_context.__exit__(exc_type, exc_value, traceback)
             self._connection_context = None
+            if self._telemetry_operation is not None:
+                self._telemetry_operation.__exit__(exc_type, exc_value, traceback)
+                self._telemetry_operation = None
         return None
 
     def _require_connection(self) -> Connection:
@@ -163,7 +171,8 @@ class PostgresUnitOfWorkFactory:
     """Create a fresh request-scoped unit of work from the shared engine."""
 
     engine: Engine
+    telemetry: Telemetry | None = None
 
     def request(self) -> PostgresRequestUnitOfWork:
         """Return a new, not-yet-entered request unit of work."""
-        return PostgresRequestUnitOfWork(self.engine)
+        return PostgresRequestUnitOfWork(self.engine, self.telemetry)

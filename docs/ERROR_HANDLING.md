@@ -64,13 +64,54 @@ retry, idempotency ve belirsiz yazma sonucu davranışını belirlemek.
 
 ## Açık sorular
 
-- Servis bazlı retry sayısı/toplam süre ve UI bekleme eşikleri.
-- Execution reconciliation job periyodu ve manuel müdahale SLA'sı.
-- İlk allowlist operasyonlarda partial failure'a gerçekten ihtiyaç olup olmadığı.
 - Anthropic SDK hata sınıflarının retry matrisi (SDK sürümü seçilince doğrulanacak).
 
 ## Güncelleme geçmişi
 
+- 2026-07-22 — Faz 5.6 kapandı: `todo.md` 9.1'in eklediği yapılandırılmış JSON logging
+  (`observability/logging.py::JsonEventLogger`) artık bu maddenin tek eksik parçasıydı --
+  `mcp/tools.py::_fetch_report_page`/`sync_accessible_accounts`'ın gerçek bir Google Ads
+  `AdsApiError`'ı yakaladığı iki noktaya (`_log_google_ads_failure`) bağlandı: her
+  Google Ads-kaynaklı hata `operation` (`google_ads_<rapor>_report` /
+  `google_ads_account_discovery`), `reason_code` (sınıflandırıcının `code`'u),
+  principal/customer pseudonymous referansı ve Google'ın kendi `request_id`'siyle
+  (yeni `JsonEventLogger.emit(google_request_id=...)` alanı, yalnız güvenli
+  karakter kümesiyle eşleşirse taşınır, aksi halde tamamen atlanır) tek bir olay
+  olarak kaydediliyor. `AdsApiError.message` (Google'ın kendi serbest metni) bilinçli
+  olarak sabit şemaya eklenmedi -- yalnız kod/`request_id` audit/telemetry'ye taşınır.
+  Bizim kendi ürettiğimiz `AdsApiError`'lar (rate-limit/invalid_date/invalid_page_token
+  gibi, `request_id=None`) bu logu tetiklemez -- yalnız gerçek Google Ads/transport
+  kaynaklı hatalar loglanır. Kanıt:
+  `backend/tests/test_observability.py::test_google_request_id_is_carried_when_present_and_safe`/
+  `test_google_request_id_is_omitted_when_absent_or_unsafe`,
+  `backend/tests/test_mcp_integration.py::test_google_ads_failure_logs_the_google_request_id`
+  (gerçek MCP tool-call zinciri + gerçek `GoogleAdsException` üzerinden uçtan uca).
+  Doğrulama: `python -m unittest discover -s backend/tests` (553 test, OK), `pyright
+  backend/src` (0 hata), `ruff check .`/`ruff format --check .` (temiz), `bandit -c
+  backend/pyproject.toml -r backend/src` (0 bulgu), `python tools/check_docs.py`
+  (27 belge doğrulandı), `git diff --check` (yalnız CRLF normalizasyon uyarıları).
+  Commit/push yapılmadı.
+- 2026-07-22 — Faz 6.10 bütçeleri kabul edildi: Google Ads read `4 attempt/30s`, `0.5s` taban ve
+  `8s` tavan full-jitter; DB transaction `1 attempt/5s` (serialization/deadlock ancak bütün transaction
+  idempotentse en çok 2); dış auth/discovery HTTP `3 attempt/15s`; backend model çağrısı v1'de olmadığı
+  için Anthropic runtime bütçesi yoktur. UI 2 saniyeden sonra bekleme durumu gösterir, 10 saniyede async
+  iş gerektirir. Partial failure Faz 8 allowlist'inde ihtiyaç kanıtlanana kadar kapalıdır. Unknown execution
+  5 dakikada bir reconcile edilir; 15 dakika sonunda manual review alarmı, 4 saat hedef SLA uygulanır.
+  Belirsiz mutate hiçbir durumda kör retry edilmez.
+
+- 2026-07-22 — Faz 5.6: karar tablosunun altı sınıfının tamamı (permission dahil --
+  `authorization_error` alanı `authentication_error`'dan ayrı fakat aynı AUTH sınıfına
+  düşer -- 2SV `TWO_STEP_VERIFICATION_NOT_ENROLLED`, boş/`unknown` failure govdesi)
+  gerçek Google Ads v24 proto hata tipleriyle `backend/tests/test_api_errors.py`'de
+  doğrulandı; sınıflandırıcı kodunda değişiklik gerekmedi (alan-adı bazlı eşleme zaten
+  her `authentication_error`/`authorization_error` değerini kapsıyordu), yalnız eksik
+  regresyon testleri eklendi. Google `request_id` her iki sınıflandırma yolunda da
+  (`classify_google_ads_exception`, boş-failure dalı dahil) yakalanıyor ve hiçbir
+  secret/payload sızdırmıyor (bkz. `test_message_never_leaks_beyond_googles_own_text`,
+  `test_unrecognised_exception_text_never_reaches_the_public_message`); ancak bunu
+  gerçek bir audit/telemetry kaydına yazacak yapısal loglama henüz yok (`todo.md` 9.1
+  hâlâ açık) -- madde bu tek eksik nedeniyle tamamlanmış sayılmadı, kod hazır olduğunda
+  9.1 bu alanı bağlayacak.
 - 2026-07-18 — Faz 3.6: "Auth" satırının "Credential pasifleştir, işleri durdur" kararı
   ilk kez koda bağlandı (`mcp/tools.py`, `mcp/credentials.py`) -- önceden karar
   belgede vardı ama hiçbir çağrı yolu bunu tetiklemiyordu; bir AUTH-class hata yalnız

@@ -493,6 +493,26 @@ class PostgresRepositoryContractTests(unittest.TestCase):
         self.assertEqual(relinked.status, "active")
         self.assertEqual(relinked.login_customer_id, "9999999999")
 
+    def test_account_sync_is_principal_scoped_and_reactivates_history(self) -> None:
+        owner = self.principals.get_or_create("iss", "sync-owner")
+        other = self.principals.get_or_create("iss", "sync-other")
+        self.accounts.link_account(owner.id, "1111111111", None)
+        self.accounts.link_account(owner.id, "2222222222", None)
+        self.accounts.link_account(other.id, "1111111111", "9999999999")
+
+        active = self.accounts.synchronize_accounts(
+            owner.id,
+            [("2222222222", "8888888888"), ("3333333333", None)],
+        )
+
+        self.assertEqual([account.customer_id for account in active], ["2222222222", "3333333333"])
+        stale = self.accounts.get_account(owner.id, "1111111111")
+        assert stale is not None
+        self.assertEqual(stale.status, "disconnected")
+        other_account = self.accounts.get_active_account(other.id, "1111111111")
+        assert other_account is not None
+        self.assertEqual(other_account.login_customer_id, "9999999999")
+
     def test_repository_does_not_commit_its_own_transaction(self) -> None:
         owner = self.principals.get_or_create("iss", "owner")
         self.accounts.link_account(owner.id, "1111111111", None)

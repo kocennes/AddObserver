@@ -34,8 +34,12 @@ Aşağıdaki matris bağlayıcı dokümantasyon kapısıdır.
 | Google Ads access, permissible use, RMF veya OAuth verification | `GOOGLE_API_ACCESS.md`, `LEGAL.md`, `SECURITY.md` | Uyum tablosu/başvuru kanıtı |
 | Directory submission veya public MCP auth | `CONNECTOR_SUBMISSION.md`, `AUTH.md`, `MCP.md`, `SECURITY.md` | Submission checklist/auth kararı |
 | Privacy, terms, kullanıcı verisi veya deletion | `LEGAL.md`, `../PRIVACY_POLICY.md`, `../TERMS.md`, `SECURITY.md` | Hukuki karar + public metin |
+| Production veri envanteri, subprocessor veya transfer | `LEGAL.md`, `PRODUCTION_DATA_INVENTORY.md`, `SUBPROCESSORS.md`, `SECURITY.md` | Envanter + subprocessor kaydı |
+| Google developer-token/OAuth submission veya RMF kanıtı | `GOOGLE_API_ACCESS.md`, `GOOGLE_SUBMISSION_EVIDENCE.md`, `SECURITY.md` | Başvuru paketi + sonuç kanıtı |
+| Kullanıcı hakkı, legal hold veya veri ihlali bildirimi | `LEGAL.md`, `LEGAL_OPERATIONS_RUNBOOK.md`, `OPERATIONS.md`, `SECURITY.md` | Hukuk kararı + runbook/tatbikat |
 | Retry, queue veya hata mesajı | `ERROR_HANDLING.md`, `RATE_LIMITS.md` | Hata matrisi/limit kararı |
 | Onay ekranı veya başka UI | `PRODUCT.md`, `DESIGN.md`, `SECURITY.md` | Akış/kabul kriteri değiştiyse ilgili belge |
+| Bekleyen onay bildirimi (email/Slack/webhook) | `NOTIFICATIONS.md`, `LEGAL.md`, `SECURITY.md` | Bildirim kararı + kanal onay/consent akışı |
 | Log, metric, trace veya audit | `OBSERVABILITY.md`, `SECURITY.md` | Telemetry/audit şeması |
 | Test/CI | `TESTING.md`, `DEPLOYMENT.md` | Test matrisi/pipeline |
 | Deploy veya altyapı | `DEPLOYMENT.md`, `OPERATIONS.md`, `SECURITY.md` | Altyapı kararı/runbook |
@@ -50,6 +54,10 @@ Aşağıdaki matris bağlayıcı dokümantasyon kapısıdır.
 - En az üç ayda bir Google Ads, OAuth, Anthropic/MCP ve bağımlılık sürümleri yeniden kontrol edilir.
 - `Taslak` kararlar uygulama yetkisi vermez. `Kabul edildi` kararlar bağlayıcıdır.
 - Belge içinde `TBD` kalabilir; fakat ilgili `TBD` kapanmadan ona bağımlı üretim kodu yazılmaz.
+- Geçici belge sahibi repository CODEOWNER `@kocennes`'tir. Güvenlik/auth/legal/deployment belgeleri için
+  review hedefi 5 iş günü, diğer bağlayıcı belgeler için 10 iş günüdür; bu 7/24 destek taahhüdü değildir.
+- Belge sahibi üç aylık review tarihini ve kaynak güncelliğini takip eder. Hukuki belgeler gerçek hukukçu
+  onayı olmadan `Kabul edildi` yapılamaz.
 
 ## Değişiklik kontrol listesi
 
@@ -62,9 +70,14 @@ Aşağıdaki matris bağlayıcı dokümantasyon kapısıdır.
 
 ## Açık sorular
 
-- Belge link/status kontrolünü CI'da otomatikleştirecek araç.
-- Belge sahipleri ve review SLA'ları.
+- İkinci belge reviewer'ı ve tek-sahip bus-factor azaltma planı.
+- External linkler vendor/network flakiness nedeniyle PR'ı bloklamaz: metadata/status/date/internal-link/
+  matrix/ADR/encoding her PR'da zorunludur; dış link taraması üç aylık review'da bounded timeout/concurrency
+  ile çalıştırılır ve bulgusu triage edilir.
 
 ## Güncelleme geçmişi
 
+- 2026-07-22 — Faz 7.5: yeni `NOTIFICATIONS.md` matrise eklendi (bkz. o belgenin "bugün gerekli
+  değil" kararı).
+- 2026-07-22 — CODEOWNER tabanlı geçici sahiplik/review hedefleri ve CI/internal-vs-external link kapısı eklendi.
 - 2026-07-17 — Public connector için Google access, directory submission ve legal kapıları eklendi.

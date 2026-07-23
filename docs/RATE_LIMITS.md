@@ -37,18 +37,27 @@ bir kullanıcının ücretsiz ortak kapasiteyi tüketip diğerlerini aç bırakm
 - `RESOURCE_TEMPORARILY_EXHAUSTED` / `RESOURCE_EXHAUSTED` geldiğinde ilgili scope durdurulur; `retry_delay`
   ve full-jitter exponential backoff uygulanır. Diğer principal bucket'ları gereksiz durdurulmaz.
 - Batching yalnız aynı principal/customer, uyumlu işlem ve bağımsız onay sınırında yapılır. Büyük GAQL seçimi
-  alan/tarih/pagination ile küçültülür; response 64 MB sınırına yaklaşmaz.
+  alan/tarih/pagination ile küçültülür; response 64 MB sınırına yaklaşmaz. Google Ads API v19+ `Search`
+  sayfa boyutu sabit 10.000 satırdır ve `page_size` alanı gönderilemez; connector yalnız opaque
+  `next_page_token` ile sonraki sabit sayfayı ister.
 - Backpressure UI'da “kuyrukta / tahmini başlama” olarak görünür. Limit aşımı başarı gibi gizlenmez.
 - Public GA için Standard Access hedeflenir fakat bu rate limiting'i kaldırmaz; RMF/başvuru kapısı
   `GOOGLE_API_ACCESS.md` içindedir.
 
 ## Açık sorular
 
-- Queue/distributed limiter teknolojisi (Redis, DB tabanlı veya yönetilen queue).
+- Production distributed limiter/queue sağlayıcısı; local ve tek-worker contract uygulaması scope-aware
+  token bucket'tır, çok-worker production bu process-local backend ile başlatılmaz.
 - İlk concurrency/QPS değerleri ve Anthropic workspace limitleri.
 - Ürün ücretsiz olduğu için principal ağırlıklarının eşit/fair-use sınırları.
 - Günlük budget rezervinin kritik execution için kesin yüzdesi.
 
 ## Güncelleme geçmişi
 
+- 2026-07-22 — Faz 6.7 için thread-safe, bounded ve scope-keyed token bucket contract'ı eklendi.
+  Principal/customer scope tükenmesinin başka principal'ı etkilemediği ve güvenli retry-after hesabı
+  test edildi. Kesin kapasite/refill değerleri provider sabiti değildir; deployment config kararıdır.
+
+- 2026-07-22 — Google Ads v19+ sabit 10.000 satırlık `Search` paging davranışı ve kaldırılmış
+  `page_size` alanı uygulama sözleşmesine işlendi.
 - 2026-07-17 — Çift kapsamlı limiter, fair queue, operation budget eşikleri ve backpressure politikası tanımlandı.

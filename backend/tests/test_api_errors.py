@@ -23,6 +23,7 @@ from backend.src.api.errors import (
 from google.ads.googleads.errors import GoogleAdsException
 from google.ads.googleads.v24.errors.types import (
     authentication_error,
+    authorization_error,
     internal_error,
     quota_error,
     request_error,
@@ -77,6 +78,54 @@ class ClassifyGoogleAdsExceptionTests(unittest.TestCase):
         result = classify_google_ads_exception(_exception_for(error))
         self.assertEqual(result.error_class, ErrorClass.AUTH)
         self.assertFalse(result.retryable)
+
+    def test_authorization_error_is_auth_and_not_retryable(self) -> None:
+        """ERROR_HANDLING.md's "Auth" row also covers permission failures, not just
+        expired/invalid tokens -- ``authorization_error`` is its own oneof field,
+        distinct from ``authentication_error``, and must classify identically."""
+        error = error_types.GoogleAdsError(
+            error_code=error_types.ErrorCode(
+                authorization_error=(
+                    authorization_error.AuthorizationErrorEnum.AuthorizationError.USER_PERMISSION_DENIED
+                )
+            ),
+            message="User does not have permission to access this customer.",
+        )
+        result = classify_google_ads_exception(_exception_for(error))
+        self.assertEqual(result.error_class, ErrorClass.AUTH)
+        self.assertFalse(result.retryable)
+
+    def test_two_step_verification_not_enrolled_is_auth_and_not_retryable(self) -> None:
+        """ERROR_HANDLING.md explicitly names ``TWO_STEP_VERIFICATION_NOT_ENROLLED`` as
+        an Auth-row example (docs/ERROR_HANDLING.md "Auth satirinin uygulamasi") --
+        the classifier must not need a value-specific branch to catch it; any
+        ``authentication_error`` value is AUTH by field name alone."""
+        error = error_types.GoogleAdsError(
+            error_code=error_types.ErrorCode(
+                authentication_error=(
+                    authentication_error.AuthenticationErrorEnum.AuthenticationError.TWO_STEP_VERIFICATION_NOT_ENROLLED
+                )
+            ),
+            message="Two-step verification is required for this account.",
+        )
+        result = classify_google_ads_exception(_exception_for(error))
+        self.assertEqual(result.error_class, ErrorClass.AUTH)
+        self.assertFalse(result.retryable)
+
+    def test_empty_failure_body_is_unknown_transient_and_retryable(self) -> None:
+        """Google Ads can, in principle, return a failure with no reported error
+        (docs/get-started/handle-errors doesn't guarantee a non-empty list). This must
+        fail safe as a retryable-but-unclassified case, never crash on ``errors[0]``."""
+        failure = error_types.GoogleAdsFailure(errors=[], request_id="req-empty")
+        call = _FakeRpcCall(grpc.StatusCode.INVALID_ARGUMENT)
+        exc = GoogleAdsException(error=call, call=call, failure=failure, request_id="req-empty")
+
+        result = classify_google_ads_exception(exc)
+
+        self.assertEqual(result.error_class, ErrorClass.TRANSIENT)
+        self.assertTrue(result.retryable)
+        self.assertEqual(result.code, "empty_failure")
+        self.assertEqual(result.request_id, "req-empty")
 
     def test_internal_transient_error_is_transient_and_retryable(self) -> None:
         error = error_types.GoogleAdsError(

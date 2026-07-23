@@ -57,7 +57,22 @@ Klasör zaten Git deposuysa yalnız remote doğrulanır; yeniden `git init` çal
 - Merge yöntemi (squash/rebase/merge commit) ekip tarafından seçilecek.
 - GitHub Actions ve push protection kullanılabilirliği repository planına göre doğrulanacak.
 
+## Faz 10 repository politikası ve doğrulanan durum
+
+- GitHub connector 2026-07-22'de repository'nin `public`, default branch'in `main`, remote'un
+  `kocennes/AddObserver` ve bağlı kullanıcının admin yetkili olduğunu doğruladı.
+- Geçici tek-sahipli modelde CODEOWNER `@kocennes`'tir; auth, DB, docs ve workflow değişiklikleri bu sahibin
+  review'unu ister. Hayali ekip veya ikinci reviewer tanımlanmaz.
+- Hedef `main` ruleset: direct/force push ve delete kapalı; en az 1 review, stale dismissal, conversation
+  resolution ve `lint-format`, `type-check`, `test-python-3.11`, `test-python-3.13`, `docs`, `security`,
+  `migrations`, `container` check'leri zorunlu.
+- Yalnız squash merge açık; merge commit/rebase/auto-merge kapalı. Secret scanning/push protection ve
+  Dependabot security updates açık olmalıdır.
+- Bu oturumda GitHub CLI yoktur ve connector repository-settings/ruleset mutasyonu sunmamaktadır. Uzak
+  ayarlar uygulanmış sayılmaz; Settings/API kanıtı gelene kadar 10.8 açıktır.
+
 ## Güncelleme geçmişi
 
+- 2026-07-22 — Public/default-branch/admin durumu doğrulandı; CODEOWNERS, Dependabot ve hedef ruleset/check/
+  merge politikası belirlendi. Uzak enforcement araç eksikliği nedeniyle açık kaldı.
 - 2026-07-17 — Canonical GitHub repository, `origin`, `main` ve güvenli push/pull kuralları tanımlandı.
-

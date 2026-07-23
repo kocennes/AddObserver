@@ -49,6 +49,34 @@ class GoogleAdsCredentialReference:
     login_customer_id: str | None
 
 
+def resolve_connector_oauth_credential(
+    *,
+    principal_id: str,
+    oauth_credentials: OAuthCredentialStore,
+) -> OAuthCredential:
+    """Return the principal's active Google OAuth credential metadata.
+
+    Unlike ``resolve_google_ads_credential_reference``, this never looks up an
+    ``ads_account`` row -- account discovery (``mcp/tools.py::sync_accessible_accounts``)
+    is what *populates* that table, so it cannot depend on one already existing.
+    ``ListAccessibleCustomers`` itself needs no ``login_customer_id`` (see
+    ``api/accounts.py``); callers expanding a manager hierarchy build their own
+    ``GoogleAdsCredentialReference`` with the manager's own ``customer_id``.
+    """
+    credential = oauth_credentials.get_active(principal_id)
+    if credential is None:
+        raise AdsApiError(
+            error_class=ErrorClass.AUTH,
+            code="no_active_google_credential",
+            message=(
+                "Google hesabi bagli degil veya baglanti iptal edilmis; "
+                "yeniden baglanmaniz gerekiyor."
+            ),
+            request_id=None,
+        )
+    return credential
+
+
 def resolve_google_ads_credentials(
     *,
     principal_id: str,

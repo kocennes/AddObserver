@@ -1,0 +1,38 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_digest:
+        description: Immutable OCI digest (sha256:...)
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  preflight:
+    name: deployment-preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: test "${{ github.ref }}" = "refs/heads/main"
+      - run: echo '${{ inputs.image_digest }}' | grep -Eq '^sha256:[0-9a-f]{64}$'
+      - run: python tools/check_docs.py
+
+  staging:
+    name: deploy-staging
+    needs: preflight
+    environment: staging
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Provider adapter is intentionally blocked by ADR-0008; no deployment performed."
+
+  production:
+    name: deploy-production
+    needs: staging
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Production requires environment reviewers and a provider adapter; no deployment performed."

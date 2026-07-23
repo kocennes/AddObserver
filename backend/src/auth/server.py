@@ -276,6 +276,9 @@ async def google_callback(
             "İşlem bulunamadı", "Google geri çağrısı bilinmeyen bir işlem içeriyor.", 400
         )
 
+    if context.postgres_uow_factory is not None:
+        return await _postgres_google_callback(state, code=code, error=error, context=context)
+
     transactions = AuthorizationTransactionRepository(context.conn)
     transaction = transactions.get(state)
     if transaction is None:
@@ -329,6 +332,79 @@ async def google_callback(
     except AuthError as auth_error:
         return _error_page("İşlem tamamlanamadı", str(auth_error), 400)
     AuthorizationCodeRepository(context.conn).save(auth_code)
+
+    query = urlencode({"code": auth_code.code, "state": transaction.client_state})
+    return RedirectResponse(url=f"{transaction.redirect_uri}?{query}", status_code=302)
+
+
+async def _postgres_google_callback(
+    state: str, *, code: str | None, error: str | None, context: AuthContext
+) -> Response:
+    """PostgreSQL RLS counterpart of ``google_callback``'s Claude-client leg.
+
+    ``authorization_transaction`` predates consent and isn't principal-scoped
+    (not in ``RLS_TABLES``, see ``20260718_0002_enable_principal_rls``), so its
+    lookup needs no bound principal. Everything else this writes -- the
+    credential, the client grant and the authorization code -- lives in an
+    RLS-protected table, so those writes run in one transaction bound to the
+    principal *after* it is known. Per ADR-0006, no network call (Google's
+    code exchange, the vault write) runs inside an open DB transaction, so
+    each of those sits between two short, separately committed units of work.
+    """
+    assert context.postgres_uow_factory is not None  # nosec B101 - guarded by caller
+    with context.postgres_uow_factory.request() as work:
+        if work.repositories is None:
+            raise RuntimeError("PostgreSQL unit of work repository'leri kurulmadi")
+        transaction = work.repositories.authorization_transactions.get(state)
+    if transaction is None:
+        # Not a Claude-client transaction -- try the /approvals login fallback
+        # (docs/AUTH.md "Approval-UI web girişi").
+        return await handle_web_login_callback(state, code=code, error=error, context=context)
+
+    if error is not None or code is None:
+        query = urlencode({"error": "access_denied", "state": transaction.client_state})
+        return RedirectResponse(url=f"{transaction.redirect_uri}?{query}", status_code=302)
+
+    now = datetime.now(UTC)
+    try:
+        google_result = context.google_client.exchange_code(code=code)
+    except Exception:  # noqa: BLE001 -- classified below into a safe redirect
+        query = urlencode({"error": "server_error", "state": transaction.client_state})
+        return RedirectResponse(url=f"{transaction.redirect_uri}?{query}", status_code=302)
+
+    if (
+        google_result.granted_scopes is not None
+        and "https://www.googleapis.com/auth/adwords" not in google_result.granted_scopes
+    ):
+        query = urlencode({"error": "access_denied", "state": transaction.client_state})
+        return RedirectResponse(url=f"{transaction.redirect_uri}?{query}", status_code=302)
+
+    with context.postgres_uow_factory.request() as work:
+        if work.repositories is None:
+            raise RuntimeError("PostgreSQL unit of work repository'leri kurulmadi")
+        principal = work.repositories.principals.get_or_create(
+            "https://accounts.google.com", google_result.google_subject
+        )
+
+    vault_ref = context.vault.store(google_result.refresh_token)
+
+    try:
+        with context.postgres_uow_factory.request() as work:
+            work.bind_principal(principal.id)
+            if work.repositories is None:
+                raise RuntimeError("PostgreSQL unit of work repository'leri kurulmadi")
+            work.repositories.credentials.upsert(principal.id, vault_ref, key_version=1)
+            work.repositories.client_grants.record_consent(
+                principal.id, transaction.client_id, transaction.scope
+            )
+            # Same ordering constraint as the SQLite branch above: the code must be
+            # minted before complete_transaction flips the transaction to COMPLETED.
+            auth_code = issue_authorization_code(transaction, principal_id=principal.id, now=now)
+            completed = complete_transaction(transaction, now=now)
+            work.repositories.authorization_transactions.save(completed)
+            work.repositories.authorization_codes.save(auth_code)
+    except AuthError as auth_error:
+        return _error_page("İşlem tamamlanamadı", str(auth_error), 400)
 
     query = urlencode({"code": auth_code.code, "state": transaction.client_state})
     return RedirectResponse(url=f"{transaction.redirect_uri}?{query}", status_code=302)

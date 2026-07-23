@@ -81,6 +81,10 @@ class Settings:
     allowed_hosts: tuple[str, ...]
     cors_allowed_origins: tuple[str, ...]
     database_url: str = field(default="", repr=False)
+    rate_limit_global_capacity: float = 60.0
+    rate_limit_global_refill_per_second: float = 1.0
+    rate_limit_principal_customer_capacity: float = 10.0
+    rate_limit_principal_customer_refill_per_second: float = 0.2
 
     @property
     def mcp_resource_uri(self) -> str:
@@ -109,4 +113,14 @@ class Settings:
             allowed_hosts=allowed_hosts,
             cors_allowed_origins=cors_allowed_origins,
             database_url=os.environ.get("DATABASE_URL", ""),
+            rate_limit_global_capacity=float(os.environ.get("RATE_LIMIT_GLOBAL_CAPACITY", "60")),
+            rate_limit_global_refill_per_second=float(
+                os.environ.get("RATE_LIMIT_GLOBAL_REFILL_PER_SECOND", "1")
+            ),
+            rate_limit_principal_customer_capacity=float(
+                os.environ.get("RATE_LIMIT_PRINCIPAL_CUSTOMER_CAPACITY", "10")
+            ),
+            rate_limit_principal_customer_refill_per_second=float(
+                os.environ.get("RATE_LIMIT_PRINCIPAL_CUSTOMER_REFILL_PER_SECOND", "0.2")
+            ),
         )

@@ -61,13 +61,17 @@ token lifecycle ve Origin validation. Upstream Google token passthrough yasaktı
 
 ## Açık sorular
 
-- MCP SDK/transport sürümü ve MCP Apps ihtiyacı.
+- MCP SDK/transport sürümü. MCP Apps ihtiyacı **çözüldü (2026-07-22)**: `docs/DESIGN.md` Faz 1.3 kararı
+  gereği MCP Apps UI eklenmedi, yalnız `tools` yayımlanır — Anthropic'in submission carousel/screenshot
+  gereksinimi yalnız MCP Apps submission'larına bağlı olduğundan bize uygulanmaz (bkz.
+  `docs/CONNECTOR_SUBMISSION.md`).
 
 ## İlk tool envanteri (uygulandı)
 
 | Tool | Annotations | Google Ads'e yazar mı |
 |---|---|---|
 | `list_accessible_accounts` | read-only, local | Hayır |
+| `sync_accessible_accounts` | local-sync (readOnlyHint=false, destructiveHint=false, idempotentHint=true) | Hayır — yalnız Google'dan okur, sonucu yerel `ads_account` tablosuna yansıtır |
 | `get_campaign_performance` / `get_ad_group_performance` / `get_keyword_performance` | read-only | Hayır (okur) |
 | `prepare_proposal` | write, local, non-destructive | Hayır — yalnız `proposal` tablosuna taslak yazar |
 | `get_proposal` / `list_proposals` | read-only, local | Hayır |
@@ -81,12 +85,28 @@ cevapta `expired` olarak gösterir. `list_proposals`, yalnız çağıranın `pri
 dolmamış `pending_approval` durumundaki önerileri döndürür. Opsiyonel `customer_id` filtresi verilirse
 hesap bağlantısı tekrar doğrulanır; `limit` 1-100 arasında sınırlıdır ve varsayılan 50'dir.
 
-Yedi Directory v1 tool'unun tamamı açık, kapalı output schema yayımlar. Reporting satırları yalnız ilgili
+Sekiz Directory v1 tool'unun tamamı açık, kapalı output schema yayımlar. Reporting satırları yalnız ilgili
 campaign/ad group/keyword alanlarını; proposal çıktıları yalnız sürümlü allowlist payload ve dış proposal
 metadata'sını taşır. Input ve iç içe tüm output object şemaları `additionalProperties: false` kullanır.
+Reporting output ayrıca `row_count`, `truncated` ve nullable, imzalı `next_page_token` taşır; tek cevap en
+fazla 500 satır/512 KiB JSON row bütçesindedir. Continuation principal/customer/report/date/expiry bağlamına
+bağlıdır ve ham Google provider token'ını client'a göstermez.
 
 ## Güncelleme geçmişi
 
+- 2026-07-22 — Faz 12.2: tool envanteri tablosunda eksik olan `sync_accessible_accounts` satırı eklendi ve
+  "Yedi tool" ifadesi koddaki gerçek sayıyla ("Sekiz tool") eşleştirildi — kayıtlı tool sayısı zaten sekizdi
+  (`backend/src/mcp/output_schemas.py::TOOL_OUTPUT_SCHEMAS`, `test_mcp_integration.py`), yalnız bu belge
+  eksik/yanlış sayıyordu; kod veya test değişikliği gerekmedi.
+- 2026-07-22 — Faz 12.1 pre-submission denetimi: tool'ların annotasyon/schema/read-write ayrımı, `resource`
+  parametresi audience bağlama ve CIMD çift-bayrak reklamı güncel Anthropic authentication/review-criteria
+  sayfalarına karşı yeniden doğrulandı; kod tarafında kusur bulunmadı (bkz. `docs/CONNECTOR_SUBMISSION.md`).
+  MCP Apps screenshot açık sorusu "uygulanmıyor" olarak kapatıldı.
+- 2026-07-22 — Faz 6.2/6.3: reporting sonuçları `schema_version`, customer/date range, bounded rows,
+  opaque pagination, row count/truncation ve warnings zarfına geçirildi. Proposal payload'ı bounded,
+  tekrarsız `evidence_refs` ile `low|medium|high` risk taşır; alanlar canonical proposal hash'ine dahildir.
+
+- 2026-07-22 — Faz 5.5 bounded reporting output metadata'sı ve context-bound signed continuation eklendi.
 - 2026-07-19 — Tool envanteri contract testi ad/title/description, 64 karakter sınırı, principal argümanı
   yokluğu, read/write annotation ayrımı ve iç içe kapalı input/output schema sözleşmesini gerçek MCP
   `tools/list` cevabında doğrular. Yedi tool structured output ve explicit allowlist schema yayımlar.

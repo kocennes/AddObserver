@@ -23,15 +23,14 @@ from google.ads.googleads.v24.services.types.google_ads_service import (
     SearchGoogleAdsResponse,
 )
 
+from ..observability import Telemetry
 from .errors import AdsApiError, classify_google_ads_exception, classify_transport_error
 from .queries import (
-    DEFAULT_PAGE_SIZE,
     DateRange,
     build_ad_group_performance_query,
     build_campaign_performance_query,
     build_keyword_performance_query,
     validate_customer_id,
-    validate_page_size,
 )
 from .retry import RetryPolicy, execute_with_retry
 
@@ -72,7 +71,7 @@ class GoogleAdsSearchService(Protocol):
     """Boundary around exactly the one RPC this adapter needs, one page at a time."""
 
     def search(
-        self, *, customer_id: str, query: str, page_token: str | None, page_size: int
+        self, *, customer_id: str, query: str, page_token: str | None
     ) -> SearchGoogleAdsResponse: ...
 
 
@@ -93,13 +92,12 @@ class _RealSearchService:
         self._ga_service = ga_service
 
     def search(
-        self, *, customer_id: str, query: str, page_token: str | None, page_size: int
+        self, *, customer_id: str, query: str, page_token: str | None
     ) -> SearchGoogleAdsResponse:
         pager = self._ga_service.search(
             customer_id=customer_id,
             query=query,
             page_token=page_token or "",
-            page_size=page_size,
         )
         return next(pager.pages)
 
@@ -178,9 +176,11 @@ class GoogleAdsReportingClient:
         *,
         search_service_factory: GoogleAdsSearchServiceFactory = real_search_service_factory,
         retry_policy: RetryPolicy = RetryPolicy(),
+        telemetry: Telemetry | None = None,
     ) -> None:
         self._search_service_factory = search_service_factory
         self._retry_policy = retry_policy
+        self._telemetry = telemetry or Telemetry()
 
     def get_campaign_performance(
         self,
@@ -189,7 +189,6 @@ class GoogleAdsReportingClient:
         credentials: GoogleAdsCredentials,
         date_range: DateRange,
         page_token: str | None = None,
-        page_size: int = DEFAULT_PAGE_SIZE,
     ) -> ReportPage:
         return self._run_report(
             customer_id=customer_id,
@@ -197,7 +196,6 @@ class GoogleAdsReportingClient:
             query=build_campaign_performance_query(date_range),
             row_getters=_CAMPAIGN_ROW_GETTERS,
             page_token=page_token,
-            page_size=page_size,
         )
 
     def get_ad_group_performance(
@@ -207,7 +205,6 @@ class GoogleAdsReportingClient:
         credentials: GoogleAdsCredentials,
         date_range: DateRange,
         page_token: str | None = None,
-        page_size: int = DEFAULT_PAGE_SIZE,
     ) -> ReportPage:
         return self._run_report(
             customer_id=customer_id,
@@ -215,7 +212,6 @@ class GoogleAdsReportingClient:
             query=build_ad_group_performance_query(date_range),
             row_getters=_AD_GROUP_ROW_GETTERS,
             page_token=page_token,
-            page_size=page_size,
         )
 
     def get_keyword_performance(
@@ -225,7 +221,6 @@ class GoogleAdsReportingClient:
         credentials: GoogleAdsCredentials,
         date_range: DateRange,
         page_token: str | None = None,
-        page_size: int = DEFAULT_PAGE_SIZE,
     ) -> ReportPage:
         return self._run_report(
             customer_id=customer_id,
@@ -233,7 +228,6 @@ class GoogleAdsReportingClient:
             query=build_keyword_performance_query(date_range),
             row_getters=_KEYWORD_ROW_GETTERS,
             page_token=page_token,
-            page_size=page_size,
         )
 
     def _run_report(
@@ -244,10 +238,8 @@ class GoogleAdsReportingClient:
         query: str,
         row_getters: Mapping[str, Callable[[GoogleAdsRow], Any]],
         page_token: str | None,
-        page_size: int,
     ) -> ReportPage:
         validated_customer_id = validate_customer_id(customer_id)
-        validated_page_size = validate_page_size(page_size)
 
         # The official client eagerly refreshes the OAuth access token while
         # constructing the service (a real network round-trip to Google), so
@@ -272,7 +264,6 @@ class GoogleAdsReportingClient:
                     customer_id=validated_customer_id,
                     query=query,
                     page_token=page_token,
-                    page_size=validated_page_size,
                 )
             except GoogleAdsException as exc:
                 raise classify_google_ads_exception(exc) from exc
@@ -284,7 +275,8 @@ class GoogleAdsReportingClient:
         def _classify(exc: Exception) -> AdsApiError:
             return exc if isinstance(exc, AdsApiError) else classify_transport_error(exc)
 
-        response = execute_with_retry(_call, classify=_classify, policy=self._retry_policy)
+        with self._telemetry.operation("google", "report_search"):
+            response = execute_with_retry(_call, classify=_classify, policy=self._retry_policy)
         field_names = row_getters.keys()
         rows = tuple(_row_to_mapping(field_names, row_getters, row) for row in response.results)
         next_token = response.next_page_token or None
@@ -312,14 +304,13 @@ class FakeGoogleAdsSearchService:
         self.calls: list[dict[str, Any]] = []
 
     def search(
-        self, *, customer_id: str, query: str, page_token: str | None, page_size: int
+        self, *, customer_id: str, query: str, page_token: str | None
     ) -> SearchGoogleAdsResponse:
         self.calls.append(
             {
                 "customer_id": customer_id,
                 "query": query,
                 "page_token": page_token,
-                "page_size": page_size,
             }
         )
         if len(self.calls) <= self._fail_first_n_calls and self._raises is not None:

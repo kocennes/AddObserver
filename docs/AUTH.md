@@ -200,7 +200,12 @@ hafif bir tarayıcı oturumu eklendi.
 `docs/PRODUCT.md`'nin değişmez kabul kriteri -- "Kullanıcı disconnect ile gelecek erişimi
 durdurabilir" -- `POST /disconnect` ile karşılanır (`backend/src/auth/approvals_routes.py`,
 orkestrasyon `backend/src/auth/disconnect.py`). Aynı oturum + CSRF
-kanıtını `/approvals/{id}/decision` ile paylaşır (ayrı bir yetki yüzeyi eklemez). Tek çağrıda:
+kanıtını `/approvals/{id}/decision` ile paylaşır (ayrı bir yetki yüzeyi eklemez).
+Faz 7.4: `/approvals`'daki "Bağlantıyı kes" bağlantısı doğrudan bu POST'u tetiklemez; önce
+oturum gerektiren, mutasyon yapmayan bir `GET /disconnect` onay ekranı gösterir -- bağlı hesap
+sayısı, credential'ın kalıcı olarak silineceği uyarısı ve "bu işlem geri alınamaz" metni; asıl
+iptal yalnız oradaki formun `POST /disconnect`'i (aynı CSRF kanıtıyla) gönderilince olur. Tek
+çağrıda:
 
 - Principal'ın tüm connector `access_token`/`refresh_token` kayıtları iptal edilir
   (`TokenRepository.revoke_all_for_principal`) -- Claude bu connector oturumunu artık kullanamaz.
@@ -234,6 +239,11 @@ kriteri de karşılar; audit_event append-only kaldığı için asla silinmez (`
 - Restricted-scope security assessment'ın server-side refresh token ve rapor verisi mimarimize uygulanma kapsamı.
 
 ## Güncelleme geçmişi
+
+- 2026-07-22 — Faz 7.4: `GET /disconnect` onay ekranı eklendi (bağlı hesap sayısı, credential'ın
+  kalıcı silineceği uyarısı, "geri alınamaz" metni); `/approvals`'daki disconnect eylemi artık
+  doğrudan `POST` yerine bu ekrana yönlendiriyor, gerçek iptal hâlâ aynı oturum+CSRF korumalı
+  `POST /disconnect`'te. Kod değişikliği idempotency/audit davranışını değiştirmedi.
 
 - 2026-07-19 — Connector `/authorize` transaction oluşturma ile `/authorize/consent` okuma ve consent durum
   ilerletme işlemleri PostgreSQL production yolunda kısa unit-of-work transaction'ları kullanır. Consent

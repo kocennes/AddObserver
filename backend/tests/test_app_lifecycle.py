@@ -171,6 +171,16 @@ class AppLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(unavailable.status_code, 503)
             self.assertEqual(unavailable.json(), {"status": "unavailable"})
 
+    async def test_readiness_is_unavailable_before_startup_and_after_shutdown(self) -> None:
+        app = create_app(_settings(), google_client=FakeGoogleOAuthClient())
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url=PUBLIC_BASE_URL) as client:
+            before = await client.get("/readyz")
+            self.assertEqual(before.status_code, 503)
+        async with app.router.lifespan_context(app):
+            self.assertTrue(app.state.started)
+        self.assertFalse(app.state.started)
+
     async def test_lifespan_closes_sqlite_connection(self) -> None:
         app = create_app(_settings(), google_client=FakeGoogleOAuthClient())
         conn = app.state.auth_context.conn

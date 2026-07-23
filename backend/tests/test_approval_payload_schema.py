@@ -16,7 +16,12 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from backend.src.approval import PROPOSAL_SCHEMA_VERSION, ApprovalError, build_proposal_payload
-from backend.src.approval.payload_schema import MAX_CAMPAIGN_ID_DIGITS, MAX_RATIONALE_LENGTH
+from backend.src.approval.payload_schema import (
+    MAX_CAMPAIGN_ID_DIGITS,
+    MAX_EVIDENCE_REF_LENGTH,
+    MAX_EVIDENCE_REFS,
+    MAX_RATIONALE_LENGTH,
+)
 
 
 class BuildProposalPayloadTests(unittest.TestCase):
@@ -188,6 +193,110 @@ class BuildProposalPayloadTests(unittest.TestCase):
                 current_status="<script>alert(1)</script>",
             )
         self.assertEqual("invalid_current_status", caught.exception.code)
+
+    def test_budget_update_accepts_zero_current_amount(self) -> None:
+        """A campaign can genuinely have zero current spend; only a *negative*
+        current amount or a non-positive *proposed* amount is invalid (todo.md
+        Faz 13.6 mutation-testing finding: no prior test exercised this exact
+        boundary, so a `< 0` -> `< 1` regression would have gone undetected)."""
+        payload = build_proposal_payload(
+            proposal_type="campaign_budget_update",
+            campaign_id="5555",
+            rationale="x",
+            current_budget_amount_micros=0,
+            proposed_budget_amount_micros=5,
+        )
+        self.assertEqual(payload["before"], {"amount_micros": 0})
+
+    def test_budget_update_rejects_negative_current_amount(self) -> None:
+        with self.assertRaises(ApprovalError) as caught:
+            build_proposal_payload(
+                proposal_type="campaign_budget_update",
+                campaign_id="5555",
+                rationale="x",
+                current_budget_amount_micros=-1,
+                proposed_budget_amount_micros=5,
+            )
+        self.assertEqual("invalid_budget_amount", caught.exception.code)
+
+    def test_oversized_evidence_refs_list_is_rejected(self) -> None:
+        with self.assertRaises(ApprovalError) as caught:
+            build_proposal_payload(
+                proposal_type="campaign_pause",
+                campaign_id="5555",
+                rationale="x",
+                current_status="ENABLED",
+                evidence_refs=[str(i) for i in range(MAX_EVIDENCE_REFS + 1)],
+            )
+        self.assertEqual("invalid_evidence_refs", caught.exception.code)
+
+    def test_oversized_evidence_ref_is_rejected(self) -> None:
+        with self.assertRaises(ApprovalError) as caught:
+            build_proposal_payload(
+                proposal_type="campaign_pause",
+                campaign_id="5555",
+                rationale="x",
+                current_status="ENABLED",
+                evidence_refs=["a" * (MAX_EVIDENCE_REF_LENGTH + 1)],
+            )
+        self.assertEqual("invalid_evidence_refs", caught.exception.code)
+
+    def test_empty_evidence_ref_is_rejected(self) -> None:
+        with self.assertRaises(ApprovalError) as caught:
+            build_proposal_payload(
+                proposal_type="campaign_pause",
+                campaign_id="5555",
+                rationale="x",
+                current_status="ENABLED",
+                evidence_refs=["report-1", ""],
+            )
+        self.assertEqual("invalid_evidence_refs", caught.exception.code)
+
+    def test_duplicate_evidence_refs_are_rejected(self) -> None:
+        with self.assertRaises(ApprovalError) as caught:
+            build_proposal_payload(
+                proposal_type="campaign_pause",
+                campaign_id="5555",
+                rationale="x",
+                current_status="ENABLED",
+                evidence_refs=["report-1", "report-1"],
+            )
+        self.assertEqual("invalid_evidence_refs", caught.exception.code)
+
+    def test_valid_evidence_refs_are_preserved(self) -> None:
+        payload = build_proposal_payload(
+            proposal_type="campaign_pause",
+            campaign_id="5555",
+            rationale="x",
+            current_status="ENABLED",
+            evidence_refs=["report-1", "report-2"],
+        )
+        self.assertEqual(payload["evidence_refs"], ["report-1", "report-2"])
+
+    def test_invalid_risk_is_rejected(self) -> None:
+        with self.assertRaises(ApprovalError) as caught:
+            build_proposal_payload(
+                proposal_type="campaign_pause",
+                campaign_id="5555",
+                rationale="x",
+                current_status="ENABLED",
+                risk="critical",
+            )
+        self.assertEqual("invalid_risk", caught.exception.code)
+
+    def test_security_relevant_constants_are_pinned(self) -> None:
+        """todo.md Faz 13.6 mutation-testing finding: every other test in this file
+        derives its expected boundary from these same module constants (e.g.
+        ``MAX_CAMPAIGN_ID_DIGITS + 1``), which proves the *comparison* is correct
+        but can never catch an accidental change to the constants' own literal
+        values -- mutmut/cosmic-ray confirmed this by mutating ``19`` to ``20``
+        (and ``PROPOSAL_SCHEMA_VERSION``'s ``1`` to ``2``) without any test
+        failing. Pinning the literals here closes that specific blind spot."""
+        self.assertEqual(PROPOSAL_SCHEMA_VERSION, 1)
+        self.assertEqual(MAX_RATIONALE_LENGTH, 2000)
+        self.assertEqual(MAX_CAMPAIGN_ID_DIGITS, 19)
+        self.assertEqual(MAX_EVIDENCE_REFS, 20)
+        self.assertEqual(MAX_EVIDENCE_REF_LENGTH, 128)
 
 
 if __name__ == "__main__":

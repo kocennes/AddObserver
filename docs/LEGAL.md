@@ -70,7 +70,14 @@ kimlerle paylaştığını, ne kadar sakladığını, kullanıcı haklarını ve
 - Incident/breach bildirim prosedürü ve süreleri.
 - Google Ads müşterisiyle gerekli controller/processor sözleşmesinin biçimi ve self-service kabul mekanizması.
 
+Faz 11 karar girdileri ve hazırlık kanıtları `PRODUCTION_DATA_INVENTORY.md`, `SUBPROCESSORS.md`,
+`LEGAL_REVIEW_PACKET.md`, `LEGAL_OPERATIONS_RUNBOOK.md` ve `GOOGLE_SUBMISSION_EVIDENCE.md` içinde tutulur.
+Bu hazırlık belgeleri yukarıdaki açık soruları kapatmaz ve production işleme yetkisi vermez.
+
 ## Güncelleme geçmişi
+
+- 2026-07-22 — Faz 11 veri envanteri, hukuk soru paketi, subprocessor kaydı, hak/ihlal runbook'u ve Google
+  submission kanıt paketlerine çapraz bağlantı eklendi; dış kararlar açık tutuldu.
 
 - 2026-07-17 — Google, Anthropic, KVKK ve GDPR kaynaklarıyla ilk veri/privaсy karar çerçevesi oluşturuldu.
 - 2026-07-17 — Google Limited Use değişiklik/re-consent kapısı ve Google Ads kişisel veri sözleşmesi için

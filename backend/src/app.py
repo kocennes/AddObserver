@@ -14,7 +14,10 @@ server actually starts.
 
 from __future__ import annotations
 
+import logging
 import re
+import secrets
+import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -26,6 +29,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from .api.accounts import GoogleAdsAccountDiscoveryClient
 from .api.problems import problem_response
 from .api.reporting import GoogleAdsReportingClient
 from .api.routes import router as api_router
@@ -38,6 +42,7 @@ from .config import Settings
 from .db.connection import connect
 from .db.postgres_uow import PostgresUnitOfWorkFactory
 from .mcp.server import build_mcp_server, wrap_with_principal_auth
+from .observability import JsonEventLogger, Telemetry
 
 #: Scopes for the ``/approvals`` browser login only -- deliberately excludes
 #: ``adwords`` (docs/AUTH.md): this flow only proves "this browser belongs to
@@ -66,6 +71,7 @@ SECURITY_RESPONSE_HEADERS = {
 #: wrong (browsers cache it per-host and there is no cert to fall back to).
 HSTS_HEADER = (b"strict-transport-security", b"max-age=63072000; includeSubDomains")
 PRODUCTION_ENVIRONMENTS = frozenset({"prod", "production"})
+SERVICE_VERSION = "0.1.0"
 
 
 def _problem_response(
@@ -235,6 +241,50 @@ class SecurityHeadersMiddleware:
         await self._app(scope, receive, send_with_security_headers)
 
 
+class ObservabilityMiddleware:
+    """Measure and log HTTP requests without capturing headers, bodies, URLs or identities."""
+
+    def __init__(
+        self,
+        app: Callable[..., Awaitable[None]],
+        *,
+        event_logger: JsonEventLogger,
+        telemetry: Telemetry,
+    ) -> None:
+        self._app = app
+        self._event_logger = event_logger
+        self._telemetry = telemetry
+
+    async def __call__(
+        self, scope: dict[str, Any], receive: Callable[[], Awaitable[dict]], send: Callable
+    ) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        started = time.perf_counter()
+        status_code = 500
+
+        async def observe_send(message: dict[str, Any]) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = int(message["status"])
+            await send(message)
+
+        try:
+            with self._telemetry.operation("http", "request"):
+                await self._app(scope, receive, observe_send)
+        finally:
+            outcome = "success" if status_code < 400 else "failure"
+            self._event_logger.emit(
+                level="INFO" if status_code < 500 else "ERROR",
+                operation="http_request",
+                outcome=outcome,
+                reason_code=f"http_{status_code}",
+                correlation_id=_correlation_id_from_scope(scope),
+                duration_ms=(time.perf_counter() - started) * 1000,
+            )
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -242,17 +292,28 @@ def create_app(
     google_client: GoogleOAuthClient | None = None,
     login_google_client: GoogleOAuthClient | None = None,
     reporting_client: GoogleAdsReportingClient | None = None,
+    account_discovery_client: GoogleAdsAccountDiscoveryClient | None = None,
     postgres_uow_factory: PostgresUnitOfWorkFactory | None = None,
+    event_logger: JsonEventLogger | None = None,
+    telemetry: Telemetry | None = None,
 ) -> FastAPI:
     """Build the full connector app: OAuth 2.1 AS routes + the auth-protected ``/mcp`` endpoint.
 
-    ``vault``/``google_client``/``login_google_client``/``reporting_client`` are injectable so
-    tests can pass fakes (``FakeGoogleOAuthClient``, an in-memory
-    ``LocalEncryptedVault``, a ``GoogleAdsReportingClient`` backed by
-    ``FakeGoogleAdsSearchService``) without needing real Google credentials
-    or making real Google Ads calls.
+    ``vault``/``google_client``/``login_google_client``/``reporting_client``/
+    ``account_discovery_client`` are injectable so tests can pass fakes
+    (``FakeGoogleOAuthClient``, an in-memory ``LocalEncryptedVault``, a
+    ``GoogleAdsReportingClient``/``GoogleAdsAccountDiscoveryClient`` backed by
+    fake Google Ads services) without needing real Google credentials or
+    making real Google Ads calls.
     """
     settings = settings or Settings.load()
+    telemetry = telemetry or Telemetry()
+    event_logger = event_logger or JsonEventLogger(
+        logging.getLogger("addobserver.application"),
+        service_version=SERVICE_VERSION,
+        environment=settings.environment,
+        pseudonym_key=secrets.token_bytes(32),
+    )
     if settings.environment.lower() in PRODUCTION_ENVIRONMENTS:
         raise RuntimeError(
             "Production startup is disabled until every HTTP/MCP/auth repository path uses "
@@ -299,7 +360,10 @@ def create_app(
         settings=settings,
         conn=conn,
         vault=vault,
+        event_logger=event_logger,
+        telemetry=telemetry,
         reporting_client=reporting_client,
+        account_discovery_client=account_discovery_client,
         postgres_uow_factory=postgres_uow_factory,
     )
     mcp_app = wrap_with_principal_auth(
@@ -311,10 +375,13 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        app.state.started = False
         try:
             async with mcp_server.session_manager.run():
+                app.state.started = True
                 yield
         finally:
+            app.state.started = False
             http_client.close()
             conn.close()
 
@@ -341,7 +408,10 @@ def create_app(
     # DEPLOYMENT.md's proxy topology ADR is still open, so no `X-Forwarded-Host` trust here.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.allowed_hosts))
     app.add_middleware(CorrelationIdMiddleware)
+    app.add_middleware(ObservabilityMiddleware, event_logger=event_logger, telemetry=telemetry)
     app.add_middleware(SecurityHeadersMiddleware, hsts=settings.environment != "local")
+    app.state.started = False
+    app.state.telemetry = telemetry
     app.state.auth_context = AuthContext(
         settings=settings,
         conn=conn,
@@ -363,6 +433,8 @@ def create_app(
     @app.get("/readyz")
     async def readyz() -> JSONResponse:
         """Readiness probe: required local dependencies are reachable."""
+        if not app.state.started or http_client.is_closed:
+            return JSONResponse(status_code=503, content={"status": "unavailable"})
         try:
             conn.execute("SELECT 1").fetchone()
         except Exception:  # noqa: BLE001 -- readiness must not leak DB details

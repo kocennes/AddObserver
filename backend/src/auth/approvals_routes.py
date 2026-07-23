@@ -79,9 +79,52 @@ def _browser_request_repositories(
         )
 
 
+#: Minimal, dependency-free CSS covering docs/DESIGN.md's WCAG 2.2 AA baseline: visible
+#: 2px focus outline (focus-appearance), >=24px pointer targets, prefers-reduced-motion,
+#: and a light/dark pair that keeps body-text contrast >=4.5:1 in both (color-scheme lets
+#: the browser pick UA form-control colors that already meet this).
+_PAGE_STYLE = """
+:root{color-scheme:light dark;font-size:100%;}
+body{font-family:system-ui,sans-serif;line-height:1.5;margin:0;padding:0 1rem 2rem;
+  color:#111;background:#fff;max-width:60rem;}
+@media (prefers-color-scheme:dark){body{color:#f2f2f2;background:#121212;}}
+.skip-link{position:absolute;left:-999px;top:0;padding:.5rem 1rem;background:#fff;color:#111;}
+.skip-link:focus{left:.5rem;top:.5rem;z-index:1;}
+a:focus-visible,button:focus-visible,input:focus-visible{
+  outline:2px solid #1a56db;outline-offset:2px;}
+button{min-height:44px;min-width:44px;padding:.5rem 1rem;
+  margin:.25rem .5rem .25rem 0;font-size:1rem;}
+dt{font-weight:bold;margin-top:.5rem;}
+dd{margin-left:0;}
+article{border:1px solid currentColor;border-radius:4px;padding:1rem;margin-bottom:1rem;}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;}}
+"""
+
+
+def _page(title: str, body: str) -> str:
+    """Wrap route-specific markup in one accessible HTML5 document (docs/DESIGN.md
+    "Erişilebilirlik — WCAG 2.2 AA"): ``lang``, viewport, a skip link to ``#main``,
+    and the shared focus/contrast/reduced-motion baseline every route needs."""
+    return (
+        "<!doctype html>"
+        '<html lang="tr">'
+        "<head>"
+        '<meta charset="utf-8" />'
+        '<meta name="viewport" content="width=device-width, initial-scale=1" />'
+        f"<title>{escape(title)}</title>"
+        f"<style>{_PAGE_STYLE}</style>"
+        "</head>"
+        "<body>"
+        '<a class="skip-link" href="#main">İçeriğe geç</a>'
+        f'<main id="main">{body}</main>'
+        "</body>"
+        "</html>"
+    )
+
+
 def _error_page(title: str, description: str, status_code: int = 400) -> HTMLResponse:
-    body = f"<h1>{escape(title)}</h1><p>{escape(description)}</p>"
-    return HTMLResponse(content=body, status_code=status_code)
+    body = f'<h1>{escape(title)}</h1><p role="alert">{escape(description)}</p>'
+    return HTMLResponse(content=_page(title, body), status_code=status_code)
 
 
 async def handle_web_login_callback(
@@ -217,11 +260,42 @@ def _require_session(request: Request, web_sessions: WebSessionStore) -> Authent
     )
 
 
+#: Human-readable Turkish label per docs/approval/payload_schema.py::ProposalType --
+#: docs/DESIGN.md "Öneri ile gerçeği ayır": the raw enum value stays visible too (existing
+#: tests assert on it), this is additive, not a replacement.
+_PROPOSAL_TYPE_LABELS: dict[str, str] = {
+    "campaign_pause": "Kampanyayı duraklat",
+    "campaign_enable": "Kampanyayı etkinleştir",
+    "campaign_budget_update": "Kampanya bütçesini güncelle",
+}
+
+_RISK_LABELS: dict[str, str] = {"low": "Düşük", "medium": "Orta", "high": "Yüksek"}
+
+
 def _proposal_summary(proposal: Proposal) -> str:
     payload = proposal.payload
     proposal_type = payload.get("type", "?")
     campaign_id = payload.get("campaign_id", "?")
     return f"{proposal_type} / kampanya {campaign_id}"
+
+
+def _format_value(value: object) -> str:
+    """Render one side of a ``before``/``after`` payload dict for the approval preview.
+
+    Only the two shapes ``build_proposal_payload`` ever produces (a campaign
+    ``status`` string or an ``amount_micros`` integer) are known here; anything else
+    falls back to a plain str() so a future proposal type still renders instead of
+    crashing the page.
+    """
+    if not isinstance(value, dict):
+        return str(value)
+    if "status" in value:
+        return f"Durum: {value['status']}"
+    if "amount_micros" in value:
+        # Google Ads API micros'u dogrudan dondurur (docs/API_CONTRACTS.md); hesabin para
+        # birimi bu connector'da hic sorgulanmadigi icin bir birim/kur varsayilmiyor.
+        return f"Bütçe: {value['amount_micros']} micros"
+    return str(value)
 
 
 def _request_correlation_id(request: Request) -> str | None:
@@ -249,33 +323,140 @@ async def list_approvals(request: Request, context: AuthContext = Depends(get_co
         csrf = escape(csrf_cookie)
         rows: list[str] = []
         for proposal in pending:
-            summary = escape(_proposal_summary(proposal))
-            customer = escape(proposal.customer_id)
-            expires = escape(proposal.expires_at.isoformat())
-            proposal_id = escape(proposal.proposal_id)
-            rows.append(
-                "<li>"
-                f"<p>Hesap {customer} — {summary} (son geçerlilik: {expires})</p>"
-                f'<form method="post" action="/approvals/{proposal_id}/decision">'
-                f'<input type="hidden" name="csrf_token" value="{csrf}" />'
-                f'<button type="submit" name="decision" value="approve">Onayla: {summary}</button>'
-                f'<button type="submit" name="decision" value="reject">Reddet: {summary}</button>'
-                "</form>"
-                "</li>"
-            )
+            rows.append(_render_proposal_article(proposal, csrf))
         body = (
             "<h1>Bekleyen öneriler</h1>"
             f"<ul>{''.join(rows) if rows else '<li>Bekleyen öneri yok.</li>'}</ul>"
+            '<nav aria-label="Hesap işlemleri">'
             '<form method="post" action="/logout">'
             f'<input type="hidden" name="csrf_token" value="{csrf}" />'
             '<button type="submit">Çıkış yap</button>'
             "</form>"
-            '<form method="post" action="/disconnect">'
-            f'<input type="hidden" name="csrf_token" value="{csrf}" />'
-            '<button type="submit">Bağlantıyı kes (disconnect)</button>'
-            "</form>"
+            '<a href="/disconnect">Bağlantıyı kes (disconnect)</a>'
+            "</nav>"
         )
-        return HTMLResponse(content=body)
+        return HTMLResponse(content=_page("Bekleyen öneriler", body))
+
+
+def _render_proposal_article(proposal: Proposal, csrf: str) -> str:
+    """Render one proposal as a full pre-decision preview (docs/PRODUCT.md, docs/DESIGN.md
+    "Bilgi mimarisi" -> Öneri detayı): account, operation, resource, current/proposed
+    value, rationale/evidence, risk and expiry, plus an explicit not-yet-applied notice --
+    Faz 1 never sends a mutate to Google Ads from this screen."""
+    payload = proposal.payload
+    summary = escape(_proposal_summary(proposal))
+    customer = escape(proposal.customer_id)
+    proposal_type = str(payload.get("type", "?"))
+    operation_label = escape(_PROPOSAL_TYPE_LABELS.get(proposal_type, proposal_type))
+    campaign_id = escape(str(payload.get("campaign_id", "?")))
+    current_value = escape(_format_value(payload.get("before")))
+    proposed_value = escape(_format_value(payload.get("after")))
+    rationale = escape(str(payload.get("rationale", "")))
+    risk_raw = str(payload.get("risk", "?"))
+    risk_label = escape(_RISK_LABELS.get(risk_raw, risk_raw))
+    evidence_refs = payload.get("evidence_refs") or []
+    evidence_html = (
+        "".join(f"<li>{escape(str(ref))}</li>" for ref in evidence_refs)
+        if evidence_refs
+        else "<li>Kaynak metrik referansı belirtilmemiş.</li>"
+    )
+    expires = escape(proposal.expires_at.isoformat())
+    proposal_id = escape(proposal.proposal_id)
+    # id must be a valid HTML id token; proposal_id already passed validate_opaque_id
+    # ([A-Za-z0-9._-]) before it ever reaches a pending-list row, so no extra escaping is
+    # needed to make it a safe id/aria-labelledby target beyond the html.escape() above.
+    heading_id = f"proposal-{proposal_id}-heading"
+
+    return (
+        "<li>"
+        f'<article aria-labelledby="{heading_id}">'
+        f'<h2 id="{heading_id}">{summary}</h2>'
+        "<dl>"
+        f"<dt>Hesap</dt><dd>{customer}</dd>"
+        f"<dt>İşlem</dt><dd>{operation_label} ({escape(proposal_type)})</dd>"
+        f"<dt>Kaynak (kampanya)</dt><dd>{campaign_id}</dd>"
+        f"<dt>Mevcut değer</dt><dd>{current_value}</dd>"
+        f"<dt>Önerilen değer</dt><dd>{proposed_value}</dd>"
+        f"<dt>Gerekçe</dt><dd>{rationale}</dd>"
+        f"<dt>Kaynak metrikler</dt><dd><ul>{evidence_html}</ul></dd>"
+        f"<dt>Risk</dt><dd>{risk_label}</dd>"
+        f"<dt>Son geçerlilik</dt><dd>{expires}</dd>"
+        "<dt>Durum</dt>"
+        "<dd>Onay bekliyor. Bu ekrandan verilen karar yalnız connector veritabanına "
+        "kaydedilir; Google Ads hesabına henüz hiçbir değişiklik gönderilmedi.</dd>"
+        "</dl>"
+        f'<form method="post" action="/approvals/{proposal_id}/decision">'
+        f'<input type="hidden" name="csrf_token" value="{csrf}" />'
+        f'<button type="submit" name="decision" value="approve">Onayla: {summary}</button>'
+        f'<button type="submit" name="decision" value="reject">Reddet: {summary}</button>'
+        "</form>"
+        "</article>"
+        "</li>"
+    )
+
+
+@router.get("/disconnect")
+async def confirm_disconnect(request: Request, context: AuthContext = Depends(get_context)):
+    """Show the impact summary and irreversible-deletion warning before the real
+    ``POST /disconnect`` (docs/PRODUCT.md "disconnect ile gelecek erisimi durdurabilir";
+    docs/DESIGN.md "Onay modalı ... geri alma bilgisini tekrarlar"). A GET, so viewing it
+    never itself revokes anything -- only the CSRF-protected POST below does that."""
+    with _browser_request_repositories(request, context) as (sessions, _proposals, _approvals):
+        try:
+            session = _require_session(request, sessions)
+        except AuthError:
+            return RedirectResponse(url="/login", status_code=302)
+
+        csrf_cookie = request.cookies.get(WEB_CSRF_COOKIE)
+        try:
+            verify_csrf_token(csrf_cookie, session.csrf_token_hash)
+        except AuthError:
+            return RedirectResponse(url="/login", status_code=302)
+        if csrf_cookie is None:
+            raise RuntimeError("CSRF token verification accepted an absent cookie")
+        csrf = escape(csrf_cookie)
+
+        if context.postgres_uow_factory is None:
+            accounts_count = len(
+                AdsAccountRepository(context.conn).list_accounts(session.principal_id)
+            )
+            has_credential = (
+                OAuthCredentialRepository(context.conn).get_active(session.principal_id) is not None
+            )
+        else:
+            with context.postgres_uow_factory.request() as work:
+                if work.repositories is None:
+                    raise RuntimeError("PostgreSQL unit of work repository'leri kurulmadi")
+                accounts_count = len(work.repositories.accounts.list_accounts(session.principal_id))
+                has_credential = (
+                    work.repositories.credentials.get_active(session.principal_id) is not None
+                )
+
+    credential_line = (
+        "Google Ads bağlantı bilgileriniz (vault'ta şifreli saklanan credential) kalıcı olarak "
+        "silinecek."
+        if has_credential
+        else "Şu anda saklanan aktif bir Google Ads credential'ı yok."
+    )
+    body = (
+        "<h1>Bağlantıyı kes</h1>"
+        '<p role="alert">Bu işlem geri alınamaz. Onayladığınızda:</p>'
+        "<ul>"
+        f"<li>{accounts_count} bağlı Google Ads hesabının erişimi sonlandırılır.</li>"
+        f"<li>{escape(credential_line)}</li>"
+        "<li>Bu bağlantıya ait tüm oturumlar (bu tarayıcı dahil, diğer tarayıcılar da) "
+        "kapatılır.</li>"
+        "<li>Bekleyen öneriler ve geçmiş denetim (audit) kayıtları silinmez; ancak hesap "
+        "bağlantısı kesildiği için performans verisi bir daha çekilemez ve yeniden bağlanmak "
+        "Google ile yeni bir onay (consent) gerektirir.</li>"
+        "</ul>"
+        '<form method="post" action="/disconnect">'
+        f'<input type="hidden" name="csrf_token" value="{csrf}" />'
+        '<button type="submit">Evet, bağlantıyı kalıcı olarak kes</button>'
+        "</form>"
+        '<p><a href="/approvals">Vazgeç</a></p>'
+    )
+    return HTMLResponse(content=_page("Bağlantıyı kes", body))
 
 
 @router.post("/disconnect")

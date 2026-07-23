@@ -1,0 +1,6 @@
+# Placeholder ownership is intentionally repository-owner based until real teams exist.
+* @kocennes
+/docs/ @kocennes
+/.github/ @kocennes
+/backend/src/auth/ @kocennes
+/backend/src/db/ @kocennes

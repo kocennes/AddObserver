@@ -78,6 +78,27 @@ class AdsAccountRepositoryTests(unittest.TestCase):
         self.assertEqual(relinked.status, "active")
         self.assertEqual(relinked.login_customer_id, "9999999999")
 
+    def test_synchronize_accounts_replaces_only_owners_active_snapshot(self) -> None:
+        self.accounts.link_account(self.principal_a.id, "1111111111", None)
+        self.accounts.link_account(self.principal_a.id, "2222222222", None)
+        self.accounts.link_account(self.principal_b.id, "1111111111", "9999999999")
+
+        active = self.accounts.synchronize_accounts(
+            self.principal_a.id,
+            [("2222222222", "8888888888"), ("3333333333", None)],
+        )
+
+        self.assertEqual([account.customer_id for account in active], ["2222222222", "3333333333"])
+        stale = self.accounts.get_account(self.principal_a.id, "1111111111")
+        assert stale is not None
+        self.assertEqual(stale.status, "disconnected")
+        refreshed = self.accounts.get_active_account(self.principal_a.id, "2222222222")
+        assert refreshed is not None
+        self.assertEqual(refreshed.login_customer_id, "8888888888")
+        other = self.accounts.get_active_account(self.principal_b.id, "1111111111")
+        assert other is not None
+        self.assertEqual(other.login_customer_id, "9999999999")
+
 
 class OAuthCredentialRepositoryTests(unittest.TestCase):
     def setUp(self) -> None:

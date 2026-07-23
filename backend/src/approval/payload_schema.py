@@ -29,6 +29,8 @@ PROPOSAL_SCHEMA_VERSION = 1
 MAX_RATIONALE_LENGTH = 2000
 #: Google Ads resource IDs are ``int64``; 19 digits covers the full range.
 MAX_CAMPAIGN_ID_DIGITS = 19
+MAX_EVIDENCE_REFS = 20
+MAX_EVIDENCE_REF_LENGTH = 128
 
 _CAMPAIGN_ID_RE = re.compile(rf"^\d{{1,{MAX_CAMPAIGN_ID_DIGITS}}}$")
 #: C0 controls and DEL -- ``rationale`` is stored verbatim and may reach logs/audit
@@ -39,6 +41,7 @@ _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
 #: (docs/API_CONTRACTS.md); free text here would let the "observed current state"
 #: field become untrusted narrative text.
 _CAMPAIGN_STATUS_VALUES = frozenset({"ENABLED", "PAUSED", "REMOVED"})
+_RISK_VALUES = frozenset({"low", "medium", "high"})
 
 
 class ProposalType(StrEnum):
@@ -63,6 +66,8 @@ def build_proposal_payload(
     current_status: str | None = None,
     current_budget_amount_micros: int | None = None,
     proposed_budget_amount_micros: int | None = None,
+    evidence_refs: list[str] | None = None,
+    risk: str = "medium",
 ) -> dict[str, Any]:
     """Validate Faz 1.1 allowlist inputs and return the canonical payload dict.
 
@@ -94,6 +99,19 @@ def build_proposal_payload(
             "invalid_proposal_type", f"proposal_type su degerlerden biri olmalidir: {allowed}."
         ) from error
 
+    refs = evidence_refs or []
+    if len(refs) > MAX_EVIDENCE_REFS or any(
+        not ref or len(ref) > MAX_EVIDENCE_REF_LENGTH or _CONTROL_CHAR_RE.search(ref)
+        for ref in refs
+    ):
+        raise ApprovalError(
+            "invalid_evidence_refs", "evidence_refs sinirli ve bos olmayan kimlikler olmalidir."
+        )
+    if len(set(refs)) != len(refs):
+        raise ApprovalError("invalid_evidence_refs", "evidence_refs tekrar eden kimlik iceremez.")
+    if risk not in _RISK_VALUES:
+        raise ApprovalError("invalid_risk", "risk low, medium veya high olmalidir.")
+
     if proposal_type_enum in _TARGET_STATUS:
         before, after = _status_change(
             proposal_type_enum,
@@ -111,6 +129,8 @@ def build_proposal_payload(
         "type": proposal_type_enum.value,
         "campaign_id": campaign_id,
         "rationale": rationale,
+        "evidence_refs": refs,
+        "risk": risk,
         "before": before,
         "after": after,
     }

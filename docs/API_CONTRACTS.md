@@ -14,6 +14,14 @@ edilebilir veri sözleşmelerini tanımlamak.
 - Google Ads [API structure](https://developers.google.com/google-ads/api/docs/concepts/api-structure)
   `validate_only`; [mutate best practices](https://developers.google.com/google-ads/api/docs/mutating/best-practices)
   operasyon/response davranışını açıklar.
+- Google Ads [List Accessible Accounts](https://developers.google.com/google-ads/api/docs/account-management/listing-accounts)
+  `ListAccessibleCustomers` çağrısının yalnız OAuth kullanıcısının doğrudan eriştiği hesapları döndürdüğünü,
+  customer ID gerektirmediğini ve verilmiş `login-customer-id` değerini yok saydığını; [account hierarchy](https://developers.google.com/google-ads/api/docs/account-management/get-account-hierarchy)
+  rehberi manager alt hesaplarının ayrı `customer_client` sorgusuyla keşfedildiğini açıklar.
+- Google Ads [v24 ad group fields](https://developers.google.com/google-ads/api/fields/v24/ad_group)
+  ad group alanlarıyla birlikte seçilebilen metrics/segments matrisini; [v19+ paging](https://developers.google.com/google-ads/api/docs/reporting/paging)
+  `Search` sayfa boyutunun sabit 10.000 olduğunu, `page_size` alanının kaldırıldığını ve sonraki isteğin aynı
+  sorgu + `next_page_token` ile yapılması gerektiğini tanımlar.
 - Anthropic [review criteria](https://claude.com/docs/connectors/building/review-criteria) catch-all read/write
   tool'ları reddeder ve amaç-özel tool bekler.
 
@@ -40,12 +48,9 @@ edilebilir veri sözleşmelerini tanımlamak.
 | Metot/yol | Amaç | Yetki/koruma |
 |---|---|---|
 | `GET /api/v1/accounts` | Yetkili Ads hesapları | Principal-scoped, yalnız active hesaplar, uygulandı |
-| `POST /api/v1/analyses` | Analiz başlat | Rate limit, idempotency |
 | `GET /api/v1/proposals` | Önerileri listele | Principal + customer scope, opak cursor pagination, uygulandı |
 | `GET /api/v1/proposals/{id}` | Değişiklik önizle | Ownership check, uygulandı |
-| `POST /api/v1/proposals/{id}/decisions` | Onay/red | CSRF, role, immutable hash |
 | `POST /api/v1/proposals/{id}/executions` | Onaylı değişikliği uygula | Faz 8'e kadar yayımlanmaz; revalidation, idempotency, audit |
-| `GET /api/v1/audit-events` | Denetim izi | Auditor role, export audit |
 
 Execution endpoint'i Directory v1/Faz 1'de yayımlanmaz. Faz 8 kapısı açıldığında da ham Google Ads mutate
 payload kabul etmez; yalnız önceden doğrulanmış proposal ID uygular.
@@ -96,10 +101,50 @@ biri olabilir; `campaign_id` en fazla 19 haneli (`int64`) sayısal bir kimlik ol
 ## Açık sorular
 
 - İlk live management/execution allowlist'i Google RMF sınıflandırmasına bağlıdır.
-- Public MCP dışında ayrı kullanıcı-facing HTTP API yayınlanıp yayınlanmayacağı.
+- Faz 8 execution yüzeyi açılırsa ayrı JSON execution endpoint'ine ihtiyaç olup olmadığı.
 
 ## Güncelleme geçmişi
 
+- 2026-07-22 — Faz 6 ürün yüzeyi kararı: public v1 JSON sözleşmesi accounts ve proposal read-only
+  endpoint'leriyle sınırlandı. Analiz backend/model endpoint'i, bearer approval decision, public audit ve
+  internal admin endpoint'leri yayımlanmaz; onay yalnız browser session+CSRF akışında kalır.
+
+- 2026-07-22 — Faz 5.5 MCP reporting response'ları en fazla 500 satır ve 512 KiB UTF-8 JSON row bütçesiyle
+  sınırlandı. Response `row_count` ve `truncated` metadata'sı taşır; devam anahtarı provider token'ını
+  açığa çıkarmaz ve principal/customer/report/date/15-dakika expiry bağlamına imzalıdır. Sayfa içi kesme
+  aynı provider sayfasını signed row offset ile sürdürür; context değişimi ve bozuk/oversized token Google'a
+  ulaşmadan tek güvenli `invalid_page_token` hatasıyla reddedilir.
+- 2026-07-22 — Faz 5.4 keyword reporting contract'ı tamamlandı. Sabit `keyword_view` alan allowlist'i;
+  criterion ID, keyword text, match type/status ve metriklerin v24 proto eşlemesi; empty/two-page akışı;
+  quota/timeout/auth hata politikası ve bütün reporting tool'larını kapsayan principal ownership reddi
+  test edildi. Injection-benzeri keyword metninin GAQL'e veya kontrol akışına girmeyip değiştirilmeden yalnız
+  `keyword_text` veri alanında döndüğü contract testine alındı; provider metni talimat olarak yorumlanmaz.
+- 2026-07-22 — Faz 5.3 ad group reporting contract'ı tamamlandı. Sabit dokuz alanlı `ad_group` GAQL,
+  v24 proto mapping, empty/two-page akışı, quota/timeout/auth ortak hata politikası ve bütün reporting
+  tool'larında cross-principal ownership reddi test edildi. Güncel resmî paging araştırması sırasında
+  v19+ `Search` için kaldırılmış olan `page_size` parametresinin adapter tarafından hâlâ gönderildiği bulundu;
+  parametre ve artık geçersiz yerel page-size doğrulaması kaldırıldı, gerçek service wrapper'ın v24 isteğinde
+  yalnız `customer_id`, sabit `query` ve `page_token` gönderdiği contract testine alındı.
+- 2026-07-22 — Faz 5.2 campaign reporting contract'ı tamamlandı: campaign GAQL'i sekiz alanlı sabit
+  allowlist ve doğrulanmış en fazla 90 günlük tarih penceresiyle kilitlendi; tek RPC yalnız istenen sayfayı
+  döndürür ve sonraki sayfa çağıran tarafından opaque page token ile ayrıca istenir. Gerçek Google Ads v24
+  proto mock'ları başarı, empty page, iki sayfa, integer micros/enum eşleme, quota, timeout, auth ve güvenli
+  hata davranışını doğrular. MCP entegrasyon testleri aktif account/credential ownership'ini ve
+  cross-principal reddini ayrıca kanıtlar.
+- 2026-07-22 — Faz 5.1 tamamlandı. Doğrudan erişilebilir hesap keşfi `api/accounts.py` içinde ayrı,
+  read-only bir `ListAccessibleCustomers` adapter'ına bağlandı; adapter resmi client'ı istek başına
+  credential ile kurar, bu RPC için `login_customer_id` göndermez, merkezi retry/hata sınıflandırmasını
+  kullanır ve provider resource name'lerini yalnız doğrulanmış, benzersiz 10 haneli customer ID'lere
+  indirger. `GoogleAdsAccountDiscoveryClient.discover_accounts`, her doğrudan erişilen hesabı kendi
+  `login_customer_id`'siyle izole bir client üzerinden sabit `customer_client` GAQL'iyle sorgulayıp
+  etkin alt hesapları keşfeder (doğrudan erişim her zaman manager-türevli yoldan önceliklidir; birden
+  fazla manager aynı alt hesabı görürse sayısal en küçük doğrudan manager kazanır). Yeni MCP tool'u
+  `sync_accessible_accounts` (`LOCAL_SYNC` annotation) keşfedilen kümeyi `AdsAccountRepository`/
+  `PostgresAdsAccountRepository.synchronize_accounts` ile principal-scoped, atomik biçimde yerel
+  `ads_account` tablosuna yansıtır: artık erişilemeyen hesaplar yalnızca çağıranın principal'ı altında
+  `disconnected` yapılır (asla silinmez, asla başka principal'ın satırına dokunmaz), keşfedilen hesaplar
+  eklenir veya yeniden `active` yapılır. AUTH-class keşif hatası ortak `deactivate_credential_on_auth_failure`
+  yoluna bağlıdır.
 - 2026-07-19 — Bearer HTTP API route'larının production veri erişimi PostgreSQL request unit-of-work
   sınırına bağlandı; exact token bootstrap ve principal-scoped sorgu aynı transaction içinde yürür.
 - 2026-07-18 — Faz 1.1 kapsam kararı kapatıldı: Directory v1/Faz 1 public sözleşmesi reporting + proposal

@@ -87,6 +87,26 @@ tasarım standardını belirlemek.
 - PII/secret ekrana veya telemetry'ye sızıyor mu?
 - Kabul kriteri `PRODUCT.md` ile, güvenlik akışı `SECURITY.md` ile tutarlı mı?
 
+## Manuel erişilebilirlik kontrol listesi — `/approvals`
+
+Otomatik testler (`backend/tests/test_approvals_http.py`) yalnız markup/CSS varlığını doğrular;
+aşağıdaki kontrol listesi her Faz 7.x davranış değişikliğinden sonra elle (gerçek klavye/screen
+reader/tarayıcı ile) tekrarlanır:
+
+- [ ] Yalnız klavye ile: skip link → başlık → her öneri kartı → onayla/reddet → çıkış/disconnect
+      sırasıyla, mantıklı ve görünür focus'la gezilebiliyor mu?
+- [ ] Bir screen reader (NVDA/VoiceOver) her öneri kartını kendi başlığıyla (hesap + işlem +
+      kampanya) ayırt edilebilir okuyor mu; "Onayla"/"Reddet" butonlarının adı hangi öneriye ait
+      olduğunu tekrar etmeden anlaşılır mı?
+- [ ] 320 CSS px genişlikte yatay kaydırma olmadan tüm alanlar (özellikle `<dl>` etiket/değer
+      çiftleri) okunabiliyor mu?
+- [ ] %200 tarayıcı zoom'unda metin kesilmiyor, buton hedefleri örtüşmüyor mu?
+- [ ] Bir kontrast denetleyicisiyle gövde metni ve `article` kenarlığı hem açık hem koyu temada
+      >=4.5:1 / >=3:1 ölçütünü karşılıyor mu?
+- [ ] `prefers-reduced-motion: reduce` açıkken herhangi bir animasyon/geçiş çalışmıyor mu?
+- [ ] Onayla/Reddet/Disconnect eylemleri yalnız renkle değil, buton metniyle ayırt ediliyor mu
+      (bir renk körlüğü simülatörüyle doğrulanır)?
+
 ## Açık sorular
 
 - MCP Apps kullanılırsa Anthropic cross-platform tasarım gereksinimleri (bugün MCP Apps
@@ -94,6 +114,14 @@ tasarım standardını belirlemek.
 
 ## Güncelleme geçmişi
 
+- 2026-07-22 — Faz 7.1/7.2 uygulandı: `/approvals` artık her öneri için hesap, işlem, kaynak,
+  mevcut/önerilen değer, gerekçe, kaynak metrikler, risk, son geçerlilik ve "Google Ads hesabına
+  henüz hiçbir değişiklik gönderilmedi" durumunu tek bir `<article>` içinde gösterir (bkz.
+  "Bilgi mimarisi" -> Öneri detayı). Sayfa artık `lang="tr"`, bir `#main` skip link, `main`/`nav`
+  landmark'ları, öneri başına programatik ad veren `<h2>`+`aria-labelledby` ve görünür focus/
+  `prefers-reduced-motion`/light-dark kontrast sağlayan gömülü bir CSS temeli taşıyor
+  (`backend/src/auth/approvals_routes.py::_page`/`_PAGE_STYLE`). Ayrı bir dashboard veya MCP Apps
+  kapsamı açılmadı; kod hâlâ `/approvals`'ın minimal semantik HTML modelinde kalıyor.
 - 2026-07-18 — Faz 1.3: "İlk fazda ayrı, tasarım sistemi uygulanmış bir web dashboard olup
   olmayacağı" sorusu kapatıldı: **Faz 1'de yaratılmaz.** Deneyimin tamamı Claude içi tool
   akışında ve mevcut minimal/stilsiz semantik `/approvals` onay sayfasında kalır; yeni bir

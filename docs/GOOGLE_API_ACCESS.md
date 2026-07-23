@@ -113,9 +113,16 @@ Required Minimum Functionality (RMF) yükümlülüklerini ve OAuth doğrulama ö
 - Google Compliance'ın special-purpose/full-service sınıflandırması ve uygulanabilir RMF listesi.
 - İlk production erişim seviyesi ve beta kullanıcı/quota sınırı.
 - Doğrulanmış domain, ürün adı, support email ve tüzel/gerçek kişi başvuru sahibi.
+
+Faz 11.7–11.9 için form öncesi beyanlar, OAuth demo/test senaryosu ve geçici RMF kanıt eşlemesi
+`GOOGLE_SUBMISSION_EVIDENCE.md` içinde hazırlanmıştır. Bu paket gönderim değildir; ürün sahibi onayı, API Center
+submission kaydı ve Google'ın yazılı sınıflandırması olmadan access/RMF durumu değiştirilemez.
 - Restricted-scope security assessment'ın veri mimarimize göre kesin seviyesi, assessor, yıllık maliyeti ve takvimi.
 
 ## Güncelleme geçmişi
+
+- 2026-07-22 — Developer-token/OAuth submission kanıt paketi ve RMF eşleme belgesine bağlantı eklendi;
+  gönderim ve Google kararı blokajları korundu.
 
 - 2026-07-17 — Standard Access hedefi, RMF sınıflandırma kapısı ve OAuth verification paketi araştırıldı.
 - 2026-07-17 — Restricted scope, security assessment, Tool Change Form, denetim/demo ve end-user abuse

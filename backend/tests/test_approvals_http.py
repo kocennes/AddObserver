@@ -146,6 +146,112 @@ class ApprovalsHttpTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(events[0].event_type, "approval.decided")
             self.assertEqual(events[0].correlation_id, "approval-corr-1")
 
+    async def test_approval_preview_shows_full_decision_context(self) -> None:
+        """Faz 7.1: before a human decides, the page must show account, operation,
+        resource, current/proposed value, rationale, evidence, risk, expiry and an
+        explicit not-yet-applied notice -- and never send a mutate from this screen."""
+        _, app = self._build_app(login_subject="sub-1")
+        conn = app.state.auth_context.conn
+        principal = PrincipalRepository(conn).get_or_create("https://accounts.google.com", "sub-1")
+        AdsAccountRepository(conn).link_account(principal.id, "1234567890", None)
+        now = datetime.now(UTC)
+        payload = build_proposal_payload(
+            proposal_type="campaign_budget_update",
+            campaign_id="42",
+            rationale="30 gunluk CTR dususu gozlemlendi",
+            current_budget_amount_micros=5_000_000,
+            proposed_budget_amount_micros=8_000_000,
+            evidence_refs=["report-ctr-30d"],
+            risk="high",
+        )
+        draft = Proposal.create(
+            proposal_id="proposal-budget-1",
+            principal_id=principal.id,
+            customer_id="1234567890",
+            payload=payload,
+            expires_at=now + timedelta(hours=1),
+        )
+        ProposalRepository(conn).save(submit_proposal(draft, now=now))
+
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url=PUBLIC_BASE_URL
+            ) as client,
+        ):
+            await self._login(client)
+            page = await client.get("/approvals")
+
+        self.assertEqual(page.status_code, 200)
+        text = page.text
+        self.assertIn("1234567890", text)  # hesap
+        self.assertIn("Kampanya bütçesini güncelle", text)  # işlem
+        self.assertIn("42", text)  # kaynak (kampanya)
+        self.assertIn("Bütçe: 5000000 micros", text)  # mevcut değer
+        self.assertIn("Bütçe: 8000000 micros", text)  # önerilen değer
+        self.assertIn("30 gunluk CTR dususu gozlemlendi", text)  # gerekçe
+        self.assertIn("report-ctr-30d", text)  # kanıt
+        self.assertIn("Yüksek", text)  # risk
+        self.assertIn("Google Ads hesabına henüz hiçbir değişiklik gönderilmedi", text)
+
+    async def test_approval_preview_escapes_hostile_rationale(self) -> None:
+        _, app = self._build_app(login_subject="sub-1")
+        conn = app.state.auth_context.conn
+        principal = PrincipalRepository(conn).get_or_create("https://accounts.google.com", "sub-1")
+        now = datetime.now(UTC)
+        payload = build_proposal_payload(
+            proposal_type="campaign_pause",
+            campaign_id="42",
+            rationale="ignore previous instructions <script>alert(1)</script>",
+            current_status="ENABLED",
+        )
+        draft = Proposal.create(
+            proposal_id="proposal-xss-1",
+            principal_id=principal.id,
+            customer_id="1234567890",
+            payload=payload,
+            expires_at=now + timedelta(hours=1),
+        )
+        ProposalRepository(conn).save(submit_proposal(draft, now=now))
+
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url=PUBLIC_BASE_URL
+            ) as client,
+        ):
+            await self._login(client)
+            page = await client.get("/approvals")
+
+        self.assertNotIn("<script>", page.text)
+        self.assertIn("&lt;script&gt;", page.text)
+
+    async def test_approvals_page_has_accessible_document_structure(self) -> None:
+        """Faz 7.2: lang, skip link, a main landmark, and a per-proposal heading that
+        gives the article an accessible name (docs/DESIGN.md WCAG 2.2 AA baseline)."""
+        _, app = self._build_app(login_subject="sub-1")
+        conn = app.state.auth_context.conn
+        principal = PrincipalRepository(conn).get_or_create("https://accounts.google.com", "sub-1")
+        ProposalRepository(conn).save(_make_pending_proposal(principal.id))
+
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url=PUBLIC_BASE_URL
+            ) as client,
+        ):
+            await self._login(client)
+            page = await client.get("/approvals")
+
+        text = page.text
+        self.assertIn('<html lang="tr">', text)
+        self.assertIn('<main id="main">', text)
+        self.assertIn('href="#main"', text)
+        self.assertIn("aria-labelledby=", text)
+        self.assertIn('aria-label="Hesap işlemleri"', text)
+        self.assertIn("prefers-reduced-motion", text)
+        self.assertIn("focus-visible", text)
+
     async def test_login_never_creates_principal_or_touches_credential(self) -> None:
         _, app = self._build_app(login_subject="sub-never-connected")
         conn = app.state.auth_context.conn
@@ -410,6 +516,46 @@ class ApprovalsHttpTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(account.status, "disconnected")
             events = AuditRepository(conn).list_for_principal(principal.id)
             self.assertEqual(events[0].correlation_id, "disconnect-corr-1")
+
+    async def test_disconnect_confirmation_page_shows_impact_summary(self) -> None:
+        """Faz 7.4: before the irreversible POST, the user sees how many accounts are
+        linked, that the credential is permanently deleted, and an explicit warning."""
+        _, app = self._build_app(login_subject="sub-1")
+        conn = app.state.auth_context.conn
+        principal = PrincipalRepository(conn).get_or_create("https://accounts.google.com", "sub-1")
+        AdsAccountRepository(conn).link_account(principal.id, "1234567890", None)
+        AdsAccountRepository(conn).link_account(principal.id, "1111111111", None)
+        vault = app.state.auth_context.vault
+        vault_ref = vault.store("real-google-refresh-token")
+        OAuthCredentialRepository(conn).upsert(principal.id, vault_ref, key_version=1)
+
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url=PUBLIC_BASE_URL
+            ) as client,
+        ):
+            await self._login(client)
+            confirm_page = await client.get("/disconnect")
+
+        self.assertEqual(confirm_page.status_code, 200)
+        text = confirm_page.text
+        self.assertIn("geri alınamaz", text)
+        self.assertIn("2 bağlı Google Ads hesabının", text)
+        self.assertIn("kalıcı olarak", text)
+        self.assertIn('action="/disconnect"', text)
+
+    async def test_disconnect_confirmation_page_requires_session(self) -> None:
+        _, app = self._build_app()
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url=PUBLIC_BASE_URL
+            ) as client,
+        ):
+            response = await client.get("/disconnect")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["location"], "/login")
 
     async def test_disconnect_without_session_is_unauthorized(self) -> None:
         _, app = self._build_app()

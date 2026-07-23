@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Final
+
+#: Bumped only on a breaking output-shape change (todo.md 6.2); callers can
+#: branch on this without re-deriving it from field presence.
+SCHEMA_VERSION: Final[int] = 1
 
 _STRING = {"type": "string"}
 _INTEGER = {"type": "integer"}
 _NUMBER = {"type": "number"}
 _NULLABLE_STRING = {"anyOf": [_STRING, {"type": "null"}]}
+_WARNINGS = {"type": "array", "items": _STRING}
 
 
 def _closed_object(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
@@ -27,7 +32,17 @@ ACCOUNT = _closed_object(
     },
     ["customer_id", "login_customer_id", "status"],
 )
-ACCOUNTS_OUTPUT = _closed_object({"result": {"type": "array", "items": ACCOUNT}}, ["result"])
+#: Every account listing is fully self-describing: no date window or single
+#: customer_id applies (the tool lists across all linked/discovered accounts),
+#: so this carries only the version/warnings envelope shared with reports.
+ACCOUNTS_OUTPUT = _closed_object(
+    {
+        "schema_version": _INTEGER,
+        "accounts": {"type": "array", "items": ACCOUNT},
+        "warnings": _WARNINGS,
+    },
+    ["schema_version", "accounts", "warnings"],
+)
 
 _METRICS = {
     "impressions": _INTEGER,
@@ -36,15 +51,34 @@ _METRICS = {
     "conversions": _NUMBER,
 }
 
+_DATE_RANGE = _closed_object(
+    {"start_date": _STRING, "end_date": _STRING}, ["start_date", "end_date"]
+)
+
 
 def _report_output(row_properties: dict[str, Any]) -> dict[str, Any]:
     row = _closed_object(row_properties, list(row_properties))
     return _closed_object(
         {
+            "schema_version": _INTEGER,
+            "customer_id": _STRING,
+            "date_range": _DATE_RANGE,
             "rows": {"type": "array", "items": row},
             "next_page_token": _NULLABLE_STRING,
+            "row_count": _INTEGER,
+            "truncated": {"type": "boolean"},
+            "warnings": _WARNINGS,
         },
-        ["rows", "next_page_token"],
+        [
+            "schema_version",
+            "customer_id",
+            "date_range",
+            "rows",
+            "next_page_token",
+            "row_count",
+            "truncated",
+            "warnings",
+        ],
     )
 
 
@@ -91,10 +125,21 @@ PROPOSAL_PAYLOAD = _closed_object(
         },
         "campaign_id": _STRING,
         "rationale": _STRING,
+        "evidence_refs": {"type": "array", "items": _STRING},
+        "risk": {"type": "string", "enum": ["low", "medium", "high"]},
         "before": {"oneOf": [_STATUS_SNAPSHOT, _BUDGET_SNAPSHOT]},
         "after": {"oneOf": [_STATUS_SNAPSHOT, _BUDGET_SNAPSHOT]},
     },
-    ["schema_version", "type", "campaign_id", "rationale", "before", "after"],
+    [
+        "schema_version",
+        "type",
+        "campaign_id",
+        "rationale",
+        "evidence_refs",
+        "risk",
+        "before",
+        "after",
+    ],
 )
 PROPOSAL_OUTPUT = _closed_object(
     {
@@ -117,6 +162,7 @@ PROPOSAL_LIST_OUTPUT = _closed_object(
 
 TOOL_OUTPUT_SCHEMAS = {
     "list_accessible_accounts": ACCOUNTS_OUTPUT,
+    "sync_accessible_accounts": ACCOUNTS_OUTPUT,
     "get_campaign_performance": CAMPAIGN_REPORT_OUTPUT,
     "get_ad_group_performance": AD_GROUP_REPORT_OUTPUT,
     "get_keyword_performance": KEYWORD_REPORT_OUTPUT,

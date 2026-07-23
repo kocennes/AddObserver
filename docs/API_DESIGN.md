@@ -85,19 +85,46 @@ kullanılır:
   varsa response'a eklenir; `cursor` query parametresi verilirse bir önceki sayfanın konumundan
   devam eder. `backend/src/db/proposals.py::ProposalRepository.list_pending` `limit+1` satır çekip
   keyset `WHERE (created_at, id) > (?, ?)` ile devam eder -- asla `OFFSET` kullanmaz.
-- Google Ads reporting tool'ları (`api/reporting.py`) zaten Google'ın kendi opak `page_token`'ını
-  kullanıyor (offset değil); bu, aynı "asla offset yok" ilkesini kod değişikliği gerekmeden zaten
-  karşılıyor -- yalnız bu belgeye çapraz referanslandı.
+- Google Ads reporting tool'ları provider `page_token`'ını client'a doğrudan vermez. MCP continuation,
+  `principal_id`, `customer_id`, rapor türü, başlangıç/bitiş tarihi, provider page token, sayfa içi row
+  offset ve üretim zamanını HMAC-SHA256 ile imzalı opak bir envelope içinde taşır; 15 dakika geçerlidir.
+  Bağlam, imza, biçim ve süre hatalarının tümü aynı `invalid_page_token` sonucuna düşer. Bir provider
+  sayfası response sınırında bölünürse aynı provider sayfası imzalı row offset ile yeniden okunur; böylece
+  satır atlanmaz veya kaybolmaz, client provider token'ını göremez.
 
 ## Açık sorular
 
-- HTTP framework (Python varsayımıyla aday FastAPI) ve OpenAPI breaking-change aracı.
-- UI için aynı-origin cookie session mı, ayrı BFF mi kullanılacağı.
-- Ayrı internal admin API ihtiyacı.
+- OpenAPI snapshot için ileride harici bir semantic-diff aracı gerekip gerekmediği; mevcut CI kapısı
+  `/api/v1` path+method kümesini exact contract testiyle korur.
 - İlk desteklenecek live mutate execution allowlist'i Faz 8 Google Compliance/RMF kararına bağlıdır.
 
 ## Güncelleme geçmişi
 
+- 2026-07-22 — Faz 7.6: "UI için aynı-origin cookie session mı, ayrı BFF mi kullanılacağı" sorusu
+  kapatıldı -- **aynı-origin, secure cookie session** (mevcut uygulamanın zaten yaptığı şey; ayrı
+  bir BFF hiç yazılmadı). Gerekçe: (1) Faz 1.3 kararı gereği (`docs/DESIGN.md` "Güncelleme
+  geçmişi") ayrı bir frontend framework/dashboard yok -- `/approvals` tek bir FastAPI süreci
+  tarafından hem API hem HTML olarak sunuluyor, farklı bir origin (ör. ayrı yerde barındırılan bir
+  SPA) hiç yok ki bir BFF'nin köprüleyeceği bir sınır olsun; (2) oturum zaten `HttpOnly`+
+  `SameSite=Strict`+`Secure` (`backend/src/auth/approvals_routes.py`, `docs/AUTH.md` "Disconnect"
+  ve token/CSRF bölümleri) ile izole -- bir BFF eklemek yalnız aynı süreç içi bir isteği ekstra bir
+  ağ sıçramasına çevirirdi, ek bir güvenlik sınırı eklemezdi. Bu proje için ayrı bir
+  `decisions/0002-product-surface.md` ADR'ı yok (todo.md 7.6'nın referans verdiği dosya adı hatalı/
+  yazılmamış -- gerçek dosya `decisions/0002-hand-rolled-oauth-as-cimd.md`, farklı bir konudur);
+  karar burada ve `docs/DESIGN.md`/`docs/AUTH.md` "Güncelleme geçmişi"nde belgeleniyor, ayrı bir ADR
+  gerektirecek kadar tersine çevrilmesi zor/çok modüllü bir karar değil (tek süreç zaten üretimde).
+  Kod değişikliği yoktur.
+
+- 2026-07-22 — Faz 6.4/6.5/6.6/6.8/6.9 yüzey kararı kapatıldı: Directory v1'de analiz Claude'un
+  reporting tool sonuçları üzerinde yaptığı istemci-side iş olarak kalır; backend model çağrısı ve
+  `/analyses` yoktur. İnsan kararı yalnız same-origin cookie+CSRF `/approvals/{id}/decision` formudur;
+  bearer-token decision endpoint'i insan onayı sayılmaz ve yayımlanmaz. Auditor rolü ve genel audit API
+  v1 kapsamı dışıdır. Public JSON API yalnız mevcut üç read endpoint'idir; internal admin API yoktur.
+  `test_openapi_contract.py` bu exact `/api/v1` path/method snapshot'ını breaking-change kapısı yapar ve
+  MCP/auth callback/HTML yüzeylerini kapsam dışında doğrular.
+
+- 2026-07-22 — Faz 5.5 reporting continuation sözleşmesi eklendi: provider token'ı principal/customer/
+  report/date/expiry bağlamına imzalı envelope içine alındı ve sayfa içi row offset desteği kabul edildi.
 - 2026-07-18 — Faz 1.1 kapsam kararı kapatıldı: mevcut API/MCP yüzeyi Directory v1 için reporting + local
   proposal hazırlama olarak kalır; live Google Ads execution/tool tasarımı Faz 8'e ertelendi.
 - 2026-07-18 — Faz 1.5: "Public MCP endpoint path/versioning" sorusu kapatıldı -- mevcut path-based

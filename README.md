@@ -26,9 +26,9 @@ SQLite yolu (`backend/.data/local.db`) çalışma dizinine göre çözülür.
    python -m venv .venv
    .venv\Scripts\Activate.ps1        # POSIX: source .venv/bin/activate
    ```
-2. Backend bağımlılıklarını kurun (`backend/pyproject.toml`):
+2. Kilitli backend bağımlılıklarını kurun (`backend/uv.lock`):
    ```powershell
-   pip install -e backend
+   uv sync --directory backend --frozen
    ```
 3. `.env.example` dosyasını `.env` olarak kopyalayın ve `LOCAL_VAULT_KEY` için gerçek bir Fernet
    anahtarı üretin:
@@ -75,7 +75,7 @@ Kalite araçları (formatter/linter, type checker, test runner, SAST, secret/dep
 `docs/decisions/0003-dev-tooling.md`'de karara bağlandı; `backend[dev]` grubuyla kurulur:
 
 ```powershell
-pip install -e "backend[dev]"
+uv sync --directory backend --frozen --extra dev
 ```
 
 ```powershell

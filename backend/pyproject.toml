@@ -16,6 +16,8 @@ dependencies = [
     "SQLAlchemy>=2.0",
     "Alembic>=1.13",
     "psycopg[binary]>=3.2",
+    "opentelemetry-api>=1.44.0",
+    "opentelemetry-sdk>=1.44.0",
 ]
 
 # Dev/CI quality tooling selected in docs/decisions/0003-dev-tooling.md. `pytest`
@@ -29,6 +31,11 @@ dev = [
     "bandit>=1.9.4",
     "detect-secrets>=1.5.0",
     "pip-audit>=2.10.1",
+    # Faz 7.6 browser E2E + automated accessibility gate (docs/TESTING.md "Test
+    # piramidi" -> E2E). Optional/heavy: `test_e2e_approvals_playwright.py` skips
+    # cleanly if these (or `python -m playwright install chromium`) are absent.
+    "playwright>=1.61.0",
+    "axe-core-python>=0.1.0",
 ]
 
 [build-system]

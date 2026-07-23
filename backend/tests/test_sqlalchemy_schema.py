@@ -32,7 +32,7 @@ class ProductionSchemaTests(unittest.TestCase):
         revision = script.get_revision("20260718_0001")
 
         assert revision is not None
-        self.assertIn("20260719_0006", script.get_heads())
+        self.assertIn("20260722_0007", script.get_heads())
         self.assertIsNone(revision.down_revision)
         self.assertTrue(callable(revision.module.upgrade))
         self.assertTrue(callable(revision.module.downgrade))
@@ -140,6 +140,16 @@ class ProductionSchemaTests(unittest.TestCase):
             {column.name for column in composite_fks[0].columns},
             {"credential_id", "principal_id"},
         )
+
+    def test_audit_append_only_migration_rejects_update_and_delete(self) -> None:
+        script = ScriptDirectory(str(ROOT / "backend" / "alembic"))
+        revision = script.get_revision("20260722_0007")
+        assert revision is not None
+        self.assertEqual(revision.down_revision, "20260719_0006")
+        source = Path(revision.path).read_text(encoding="utf-8")
+        self.assertIn("BEFORE UPDATE OR DELETE ON audit_event", source)
+        self.assertIn("RAISE EXCEPTION 'audit_event is append-only'", source)
+        self.assertNotIn("SECURITY DEFINER", source)
 
     def test_principal_scoped_tables_require_principal_id(self) -> None:
         nullable_exceptions = {"audit_event"}

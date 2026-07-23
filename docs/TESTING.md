@@ -1,7 +1,7 @@
 # Test stratejisi
 
 **Durum:** Kabul edildi  
-**Son gözden geçirme:** 2026-07-17
+**Son gözden geçirme:** 2026-07-22
 
 ## Amaç
 
@@ -24,12 +24,18 @@ sözleşmelerini gerçek müşteri verisi kullanmadan kanıtlayan test yaklaşı
 
 Testler risk tabanlı piramit ve aşağıdaki merge kapılarıyla uygulanır. Canlı Anthropic/Google testleri
 deterministik CI kapısının parçası değildir; resmi client mock'ları ve ayrılmış Google test hesabı kullanılır.
-**Sonraki gözden geçirme:** 2026-10-17
+**Sonraki gözden geçirme:** 2026-10-22
 
 ## Kalite kapısı
 
 Merge için format/lint, type check, unit, integration, güvenlik negatif testleri ve secret/dependency
 taraması başarılıdır. Testler gerçek müşteri credential'ı veya hesabı kullanmaz.
+
+GitHub Actions required check adları: `lint-format`, `type-check`, `test-python-3.11`, `test-python-3.13`,
+`docs`, `security`, `migrations`, `container`. Job'lar secret paylaşmaz/cache kullanmaz ve action'ları tam
+commit SHA ile pinler. `uv.lock` değişmeden `uv sync --frozen` başarısız olur. Dependency güncellemesi haftalık
+Dependabot veya ayrı bakım PR'ıdır; lock diff'i, test ve `pip-audit` birlikte review edilir. Critical/high açıkta
+özellik geliştirme durur; en dar sürüm güncellemesi yapılır, istisna yalnız gerekçeli ve süreli olabilir.
 
 Bağlayıcı belgelerin yaşam döngüsü metadata'sı, yerel Markdown bağlantıları, `DOCUMENTATION.md`
 matrisindeki belge hedefleri, `docs/decisions/` ADR metadata'sı (`Durum`/`Tarih`/`Sahip`, kanonik
@@ -103,7 +109,26 @@ repository'nin kendi transaction'ını commit etmemesi.
   testleriyle görünür kalır; gerçek PostgreSQL üzerinde cross-principal ve pool reuse izolasyonu
   ayrı entegrasyon testleriyle kanıtlanmalıdır.
 - **UI:** bileşen durumları, klavye, erişilebilir adlar, onay özeti ve error recovery.
-- **E2E:** test hesabı veya tamamıyla fake servisle veri→öneri→onay→uygulama→audit.
+- **E2E:** test hesabı veya tamamıyla fake servisle veri→öneri→onay→uygulama→audit. Browser E2E +
+  otomatik erişilebilirlik aracı olarak **Playwright** (Python) + **axe-core** (`axe-core-python`
+  paketiyle) seçildi (Faz 7.6): `backend/tests/test_e2e_approvals_playwright.py`, diğer tüm
+  testlerin aksine `httpx.ASGITransport` yerine gerçek bir `uvicorn` soketine karşı gerçek bir
+  Chromium başlatır; login→önizleme→axe-core taraması→klavye/skip-link→320px reflow→onayla→
+  disconnect akışını tek bir testte kanıtlar. `playwright`/`axe-core-python` bu dosyayı import
+  edemediğinde veya Chromium kurulu değilse (`python -m playwright install chromium`) test
+  `unittest.SkipTest` ile temiz biçimde atlanır -- diğer testler bu ağır (~100MB) bağımlılığa hiç
+  ihtiyaç duymaz. **Bilinen sınır:** bu dosya henüz `todo.md` 10.2'nin listelediği CI required
+  check'lerine eklenmedi (`lint-format`/`type-check`/`test-python-3.11`/`test-python-3.13`/`docs`/
+  `security`/`migrations`/`container`) -- bu, ayrı bir CI iş akışı değişikliği gerektirir ve Faz 7.6
+  kapsamı yalnız "aracı seç ve staging-benzeri ortamda çalıştığını kanıtla"ydı; CI'a bağlama
+  `todo.md`'ye ayrı bir takip maddesi olarak eklendi.
+- **Faz 13.2 uçtan uca zincir:** gerçek bir staging ortamı henüz yok (`docs/OPERATIONS.md` "Faz 13.1"),
+  bu yüzden `backend/tests/test_mcp_integration.py::test_full_chain_connect_accounts_reporting_proposal_approval_disconnect`
+  yerel eşdeğerdir: connect→accounts→reporting→proposal (gerçek MCP Streamable HTTP istemcisi
+  üzerinden) → browser approval → audit → disconnect zincirinin tamamını tek testte, her adımda
+  ayırt edici bir `X-Correlation-Id` ile kanıtlar. Bu test aynı zamanda mounted `/mcp` ASGI
+  uygulamasında `CorrelationIdMiddleware`'in gerçekten çalıştığını doğrulayan ilk testtir -- önceki
+  correlation-id testlerinin hepsi yalnız FastAPI'nin kendi route'larını (auth/approvals) kapsıyordu.
 
 ## Zorunlu güvenlik vakaları
 
@@ -184,6 +209,70 @@ oluşturmaz — bu nedenle bizim lifecycle hatamız değildir.
 - Kritik onay akışı 320 CSS px, %200 zoom ve reduced motion ile test edilir.
 - Quota ve concurrency davranışı kontrollü yük testinde doğrulanır; üretim Google hesabına yük testi yapılmaz.
 
+## DAST ve mutation testing kapsamı (Faz 13.6)
+
+### DAST
+
+- **Araç:** [OWASP ZAP](https://www.zaphq.org/) (baseline + authenticated full scan) — mevcut
+  `docs/SECURITY.md`/`docs/TESTING.md` araştırmasının zaten dayandığı OWASP Web Security Testing
+  Guide ailesiyle aynı ekosistem, CI'da headless çalışabilir.
+- **Kapsam:** unauthenticated yüzey (discovery/`.well-known`/`/healthz`/`/readyz`/OAuth `/authorize`,
+  `/token` hata yolları) + authenticated yüzey (`/mcp` bearer, `/approvals` web session) ayrı taranır;
+  `/disconnect` gibi destructive endpoint'ler yalnız ayrılmış test principal'ıyla ve az sayıda
+  kontrollü istekle taranır (fuzzing'in gerçek kullanıcı verisini/oturumunu etkilemesi engellenir).
+  Test verisi sınırı: yalnız Faz 12.3'teki ayrılmış test principal/hesabı; gerçek müşteri verisi asla
+  tarama trafiğine girmez.
+- **Bugünkü durum: BLOKE.** Gerçek bir public/staging dağıtımı yok (`docs/OPERATIONS.md` "Faz 13.1"),
+  ZAP gibi bir DAST aracı yalnız gerçekten çalışan bir HTTP yüzeyine karşı anlamlıdır; production'a
+  saldırı testi kesinlikle yapılmaz. Bugün var olan kanıt, OAuth redirect/SSRF/CSRF/CORS/injection/
+  session/rate-limit kontrollerinin **kod seviyesinde** zaten test edildiğidir (`docs/SECURITY.md`
+  "Tehdit envanteri" T2-T9, T13 satırları ve karşılık gelen testler) — bu, dinamik/black-box bir
+  taramanın yerini tutmaz (gerçek HTTP/TLS katmanı, request smuggling, verbose hata sayfası gibi
+  yalnız çalışan bir sunucuya karşı görülebilecek sınıfları kapsamaz) ama tamamlayıcıdır. Gerçek DAST
+  koşusu `todo.md` 10.4/10.5/10.7 (hosting) tamamlanıp bir staging ortamı canlandığında yapılabilir.
+
+### Mutation testing
+
+- **Araç:** [`mutmut`](https://mutmut.readthedocs.io/) Windows'ta native çalışmıyor ("please use
+  WSL", bu ortamda WSL kurulu değil) — bu proje geliştiricileri Windows'ta olabileceğinden
+  [`cosmic-ray`](https://cosmic-ray.readthedocs.io/) seçildi; aynı iş için platform-bağımsız çalışıyor.
+- **Değer kanıtı (2026-07-22, `src/approval/payload_schema.py` + `test_approval_payload_schema.py`
+  üzerinde gerçek bir koşu):** başlangıç mutant hayatta kalma oranı **%65.49** (226 mutant, 148
+  survived). İnceleme iki gerçek kategori ortaya çıkardı: (1) `ReplaceBinaryOperator_BitOr_*` (110
+  mutant) tamamen **denk (equivalent) mutant** — cosmic-ray'in operatör seti `str | None` gibi PEP 604
+  tip birleşimlerindeki `|`'yi aritmetik bit-or sanıp mutasyona uğratıyor; `from __future__ import
+  annotations` sayesinde anotasyonlar hiç çalışma zamanında değerlendirilmediğinden bu mutasyonların
+  davranışsal etkisi yok. (2) Geri kalan `NumberReplacer`/`ReplaceComparisonOperator` mutantları
+  **gerçek test boşluklarıydı**: `PROPOSAL_SCHEMA_VERSION`/`MAX_CAMPAIGN_ID_DIGITS`/`MAX_EVIDENCE_REFS`/
+  `MAX_EVIDENCE_REF_LENGTH` sabitleri hiçbir yerde kendi gerçek değerine (`1`/`19`/`20`/`128`) değil,
+  yalnız kendilerine göre (`MAX_X + 1`) test ediliyordu — sabitin kendisi değişse bile testler geçmeye
+  devam ederdi. Daha ciddisi: `_budget_change`'deki `current_budget_amount_micros < 0` sınırı hiç
+  test edilmemiş (`current_budget_amount_micros=0` ne kabul ne red olarak denenmemiş) ve
+  `evidence_refs` doğrulaması (`MAX_EVIDENCE_REFS`/`MAX_EVIDENCE_REF_LENGTH`/tekrar/boş-string
+  reddi) bu dosyada **hiç** test edilmiyordu. Bu 9 test eklendi
+  (`test_budget_update_accepts_zero_current_amount`, `test_budget_update_rejects_negative_current_amount`,
+  dört `evidence_refs` testi, `test_invalid_risk_is_rejected`, `test_security_relevant_constants_are_pinned`)
+  ve oran **%53.54**'e düştü (226 mutant, 121 survived) — kalan survivor'ların çoğu hâlâ BitOr denk
+  mutantları; birkaçı `>`/`>=` tam sınır ve `!=`/`is not` (küçük tamsayılarda CPython int-cache nedeniyle
+  fiilen denk) gibi düşük öncelikli kalan sınır durumlarıdır, bu turda daha fazla kovalanmadı.
+- **Kapsam kararı:** mutation testing her PR'ı kapatan bir zorunlu kapı **olmaz** — her mutant tam bir
+  test-dosyası yeniden çalıştırması gerektirdiğinden (bu küçük, saf-unit dosyada bile 226 mutant ~20
+  saniye sürdü; büyük/DB-bağımlı dosyalarda çok daha yavaş olur) PR başına maliyeti orantısızdır.
+  Bunun yerine: (1) `ReplaceBinaryOperator_BitOr_*` operatör ailesi bu kod tabanı için hariç tutulacak
+  şekilde config'e eklenir (denk mutant gürültüsünü ortadan kaldırır); (2) yalnız en yüksek değerli,
+  güvenlik-kritik, saf-mantık modüllerine uygulanır: `approval/payload_schema.py` (bu turda yapıldı),
+  `auth/domain.py` (PKCE/authorization code/token state machine), `db/oauth_store.py::rotate`/
+  `revoke_family` (refresh-token reuse tespiti); (3) periyodik/manuel bir denetim aracı olarak çalışır
+  (aylık dependency review'ına eklenebilir), CI'ın her PR'da çalışan zorunlu kapısına değil. Bu karar
+  `todo.md` 10.2 CI pipeline'ına ayrı bir iş akışı değişikliği gerektirmeden şimdilik belgeyle
+  kayıtlıdır; gerçek CI entegrasyonu ayrı bir takip maddesidir.
+
+## Erişilebilirlik ve performans
+
+- Otomatik axe benzeri tarama manuel klavye/screen reader kontrolünün yerine geçmez.
+- Kritik onay akışı 320 CSS px, %200 zoom ve reduced motion ile test edilir.
+- Quota ve concurrency davranışı kontrollü yük testinde doğrulanır; üretim Google hesabına yük testi yapılmaz.
+
 ## Tamamlanma tanımı
 
 Kod, test, ilgili belge, migration/rollback ve gözlemlenebilirlik birlikte teslim edilmedikçe iş tamamlanmış sayılmaz.
@@ -192,9 +281,45 @@ Kod, test, ilgili belge, migration/rollback ve gözlemlenebilirlik birlikte tesl
 
 - Google Ads test hesabıyla çalışan opt-in contract testlerinin ortamı ve sıklığı.
 - UI teknoloji seçimine göre accessibility/E2E araçları.
-- DAST ve mutation testing'in hangi fazda kalite kapısına alınacağı.
+- ~~DAST ve mutation testing'in hangi fazda kalite kapısına alınacağı~~ — **çözüldü (2026-07-22):**
+  bkz. "DAST ve mutation testing kapsamı (Faz 13.6)". DAST gerçek staging'e kadar bloke; mutation
+  testing periyodik/manuel bir denetim aracı olarak (CI zorunlu kapısı değil) `payload_schema.py`/
+  `auth/domain.py`/`db/oauth_store.py`'a uygulanacak şekilde kararlaştırıldı.
 
 ## Güncelleme geçmişi
+
+- 2026-07-22 — Faz 13.6: DAST scope/araç kararı (OWASP ZAP, gerçek staging'e kadar bloke) ve mutation
+  testing değerlendirmesi eklendi. `cosmic-ray` ile `approval/payload_schema.py` üzerinde gerçek bir koşu
+  yapıldı (mutmut Windows'ta WSL istiyor, bu ortamda yok): başlangıç %65.49 survival, 110 mutant BitOr/
+  PEP-604-tip-birleşimi denk mutant çıktı, kalanı gerçek boşluktu (self-referential sabit testleri,
+  test edilmemiş `evidence_refs` doğrulaması, test edilmemiş bütçe-negatif sınırı). 9 yeni test eklendi,
+  survival %53.54'e düştü. Kapsam kararı: CI zorunlu kapısı değil, periyodik/manuel denetim; hedef
+  modüller `payload_schema.py` (yapıldı), `auth/domain.py`, `db/oauth_store.py`.
+- 2026-07-22 — Faz 13.2: staging henüz yok, bu yüzden yerel bir uçtan uca zincir testi eklendi
+  (`test_mcp_integration.py::test_full_chain_connect_accounts_reporting_proposal_approval_disconnect`).
+  Bu, mounted `/mcp` ASGI uygulamasında `CorrelationIdMiddleware` davranışını doğrulayan ilk testtir --
+  gerçek bir boşluk olarak bulundu (önceki correlation-id testlerinin tamamı yalnız FastAPI route'larını
+  kapsıyordu). Gerçek staging'de test etme adımı hosting sağlayıcısı seçilmeden (`todo.md` 10.4/10.5/10.7)
+  yapılamaz; `todo.md` 13.2 bu yüzden `[ ]` kaldı.
+- 2026-07-22 — uv frozen lock, Python 3.11/3.13 CI matrisi, ayrı required check'ler ve statik delivery
+  contract testleri eklendi; dependency remediation akışı belgelendi.
+- 2026-07-22 — Faz 7.6: Browser E2E + otomatik erişilebilirlik aracı olarak Playwright + axe-core
+  seçildi ve `backend/tests/test_e2e_approvals_playwright.py` eklendi (bkz. "Test piramidi" → E2E).
+  `backend/pyproject.toml` dev extras'ına opsiyonel `playwright`/`axe-core-python` eklendi.
+
+- 2026-07-22 — Faz 7.4: `GET /disconnect` onay ekranı için oturum gerektiren erişim ve etki
+  özeti içeriği (bağlı hesap sayısı, credential silinme uyarısı, form action) doğrulayan
+  testler eklendi (`backend/tests/test_approvals_http.py`).
+
+- 2026-07-22 — Faz 7.1/7.2: `/approvals` tam önizleme (hesap, işlem, kaynak, mevcut/önerilen değer,
+  gerekçe, kaynak metrikler, risk, son geçerlilik, "henüz uygulanmadı" durumu) ve WCAG 2.2 AA
+  temel katmanı (`lang`, skip link, `main`/`nav` landmark, öneri başına `<h2>`+`aria-labelledby`,
+  görünür focus, `prefers-reduced-motion`, light/dark kontrast) için regresyon testleri eklendi
+  (`backend/tests/test_approvals_http.py`): tam bağlam görünürlüğü, hostile rationale escape'i,
+  erişilebilir doküman yapısı.
+
+- 2026-07-22 — Faz 9 için JSON log injection/redaction/pseudonymization, OpenTelemetry allowlist,
+  pre-start/post-shutdown readiness, append-only audit migration ve beş secretsiz incident drill testi eklendi.
 
 - 2026-07-19 — Connector authorization transaction repository seçimi için production PostgreSQL
   unit-of-work lifecycle ve hata rollback contract testleri eklendi (`test_postgres_authorize_routes.py`).

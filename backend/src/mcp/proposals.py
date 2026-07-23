@@ -102,6 +102,8 @@ def register_proposal_tools(
         current_status: str | None = None,
         current_budget_amount_micros: int | None = None,
         proposed_budget_amount_micros: int | None = None,
+        evidence_refs: list[str] | None = None,
+        risk: str = "medium",
         expires_in_minutes: int = DEFAULT_EXPIRY_MINUTES,
     ) -> dict[str, Any]:
         """Draft a Faz 1.1 allowlist proposal (campaign pause/enable or budget update) for
@@ -128,6 +130,8 @@ def register_proposal_tools(
                 current_status=current_status,
                 current_budget_amount_micros=current_budget_amount_micros,
                 proposed_budget_amount_micros=proposed_budget_amount_micros,
+                evidence_refs=evidence_refs,
+                risk=risk,
             )
 
             now = datetime.now(UTC)

@@ -76,6 +76,10 @@ uygulayabilecek somut bir veritabanı yaklaşımına dönüştürmek.
 
 ## Güncelleme geçmişi
 
+- 2026-07-22 — `20260722_0007_append_only_audit` migration'ı `audit_event` satırlarında UPDATE/DELETE'i
+  PostgreSQL trigger'ıyla tüm roller için reddeder. Uzun dönem WORM export/retention sağlayıcısı seçilmedi;
+  ilgili açık karar korunur.
+
 - 2026-07-19 — ADR-0007 ile disconnect DB–vault atomiklik boşluğu için credential revocation outbox kabul
   edildi; migration principal RLS, composite credential ownership ve credential başına tek iş constraint'i
   kurar. Repository atomik/idempotent enqueue ile principal-scoped lease/retry/completion davranışını ekler;
@@ -133,3 +137,16 @@ uygulayabilecek somut bir veritabanı yaklaşımına dönüştürmek.
   transaction sınırını kullanır: authorization code exact-hash bootstrap → atomik claim → access/refresh
   insert ve refresh exact-hash bootstrap → rotate aynı connection/transaction içindedir. Factory yoksa local
   SQLite test/geliştirme yolu korunur; diğer route/MCP yolları taşınana kadar production başlangıcı kapalıdır.
+- 2026-07-22 — `auth/server.py::google_callback`'in Claude-client dalı (Google Ads refresh token'ını
+  vault'a yazan ve `oauth_credential`/`oauth_client_grant`/`authorization_code`'a işleyen dal) production
+  unit-of-work'e taşındı; bu, dual-path olmayan tek kalan SQLite-only yazma yoluydu (diğer tüm auth/API/MCP
+  çağrı noktaları zaten dual-path'ti). `authorization_transaction` RLS'siz olduğundan ilk okuma principal
+  bağlamadan yapılır; Google code exchange ve vault yazımı hiçbir açık DB transaction'ı içinde çalışmaz
+  (ADR-0006) -- üç ayrı kısa transaction: (1) transaction oku, (2) principal `get_or_create`, (3) vault
+  yazımından sonra `bind_principal` ile credential/grant/code yazımı ve transaction'ı `completed`'a
+  taşıma. Yeni `backend/tests/test_postgres_google_callback_route.py`, bu sıralamayı, kısmi-scope
+  reddinde vault'a hiç dokunulmadığını, tamamlanmış bir transaction'ın yeniden kullanılmasının yazma
+  transaction'ını rollback ettiğini ve tam ASGI akışının (`/authorize` → `/authorize/consent` →
+  `/google/callback`) sahte bir PostgreSQL backend'i üzerinden uçtan uca çalıştığını kanıtlıyor. Canlı
+  PostgreSQL RLS izolasyon/concurrency kanıtı (`test_postgres_rls_integration.py`) bu makinede DSN
+  olmadığı için hâlâ skip kalıyor; 4.3 bu yüzden açık kalmaya devam ediyor.

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Iterable
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import MappingProxyType
@@ -690,6 +691,18 @@ class PostgresAdsAccountRepository:
             .where(ads_account.c.principal_id == principal_id)
             .values(status="disconnected")
         )
+
+    def synchronize_accounts(
+        self,
+        principal_id: str,
+        discovered: Iterable[tuple[str, str | None]],
+    ) -> list[AdsAccount]:
+        """Replace one principal's active account snapshot in the caller's transaction."""
+        normalized = dict(discovered)
+        self.disconnect_all(principal_id)
+        for customer_id, login_customer_id in sorted(normalized.items()):
+            self.link_account(principal_id, customer_id, login_customer_id)
+        return self.list_active_accounts(principal_id)
 
 
 def _account_from_row(row: RowMapping) -> AdsAccount:

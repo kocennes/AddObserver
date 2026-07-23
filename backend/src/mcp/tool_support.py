@@ -30,6 +30,15 @@ LOCAL_WRITE = ToolAnnotations(
     readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False
 )
 
+#: Reads a live Google Ads account (``openWorldHint=True``) and mirrors the result
+#: into our own local ``ads_account`` bookkeeping. Never mutates an actual Google
+#: Ads resource (``destructiveHint=False``), and repeated calls with the same
+#: underlying Google state converge to the same local snapshot
+#: (``idempotentHint=True``) -- but it does write locally, so ``readOnlyHint=False``.
+LOCAL_SYNC = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True
+)
+
 
 def authenticated_principal_id(ctx: Context) -> str:
     """Return the caller's principal id from its verified connector access token.

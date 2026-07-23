@@ -13,13 +13,11 @@ sys.path.insert(0, str(ROOT))
 from backend.src.api.errors import AdsApiError, ErrorClass
 from backend.src.api.queries import (
     MAX_DATE_RANGE_DAYS,
-    MAX_PAGE_SIZE,
     DateRange,
     build_ad_group_performance_query,
     build_campaign_performance_query,
     build_keyword_performance_query,
     validate_customer_id,
-    validate_page_size,
 )
 
 
@@ -40,19 +38,6 @@ class ValidateCustomerIdTests(unittest.TestCase):
     def test_rejects_wrong_length(self) -> None:
         with self.assertRaises(AdsApiError):
             validate_customer_id("123")
-
-
-class ValidatePageSizeTests(unittest.TestCase):
-    def test_accepts_in_range_value(self) -> None:
-        self.assertEqual(validate_page_size(50), 50)
-
-    def test_rejects_zero_and_negative(self) -> None:
-        with self.assertRaises(AdsApiError):
-            validate_page_size(0)
-
-    def test_rejects_above_max(self) -> None:
-        with self.assertRaises(AdsApiError):
-            validate_page_size(MAX_PAGE_SIZE + 1)
 
 
 class DateRangeTests(unittest.TestCase):

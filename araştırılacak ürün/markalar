@@ -1,0 +1,666 @@
+# PCO Dimax HD+ için dış ortam PTZ muhafaza üreticisi araştırması
+
+**Araştırma tarihi:** 23 Temmuz 2026  
+**Araştırılan ihtiyaç:** PCO Dimax HD+ yüksek hızlı kameranın dış ortamda sürekli
+kullanılabilmesi için IP66/IP67 seviyesinde, ısıtmalı/soğutmalı, motorlu pan-tilt (PTZ)
+muhafazaya entegrasyonu.
+
+## 1. Kısa sonuç
+
+Bu proje standart bir CCTV kamerası satın alma işi değildir. Mevcut PCO kamera, lensi ve
+haberleşme altyapısı korunarak özel bir muhafazaya ve ağır yük pan-tilt ünitesine entegre
+edilecektir. İncelenen üreticiler içinde ilk temas kurulması önerilen firmalar:
+
+1. **BIT-CCTV / Blue Icon Technology (Tianjin)** — en güçlü genel aday. Ağır yük PTZ,
+   özel kamera muhafazası, özel optik pencere, kablolama ve ısıtma/soğutma kabiliyetini
+   aynı üretici açıkça sunuyor.
+2. **Tianjin Zhongan Video Technology** — 30 kg ve 120 kg sınıfında belgeli pan-tilt
+   ürünleri ile özel kamera muhafazası/OEM-ODM kabiliyeti nedeniyle güçlü alternatif.
+3. **AIPTZ / Shenzhen JieShian Electronic Technology** — 20–100 kg arasında çok sayıda
+   PTZ platformu ve proje bazlı donanım/yazılım özelleştirmesi sunuyor. PCO'ya özel
+   muhafazayı gerçekten üretip üretemeyeceği teklif aşamasında teyit edilmeli.
+4. **Hangzhou SOAR Security Technology** — fan, ısıtıcı, silecek ve sıcaklık alarmı
+   bulunan özel uzun menzil muhafaza/PTZ sistemleri yapıyor; ancak yayımlanan muhafazanın
+   5 kg iç yük sınırı PCO Dimax HD+ için yetersiz. Büyütülmüş özel tasarım gerekir.
+5. **ZAEX / Changzhou Zuoan Electronics** — yüksek sıcaklık, IP68, 316L paslanmaz ve
+   hava/su soğutmalı muhafazada en dikkat çekici uzman. Komple PCO PTZ çözümü yerine,
+   ağır yük PTZ üreticisiyle birlikte muhafaza/termal yönetim alt yüklenicisi olarak daha
+   uygun olabilir.
+
+**Önerilen teklif sırası:** BIT-CCTV → Zhongan → AIPTZ → SOAR. Ortam sıcaklığı veya
+roket testinden gelen radyant ısı olağan dışı yüksekse ZAEX aynı anda görüşmeye
+alınmalıdır.
+
+## 2. Kameradan gelen tasarım tabanı
+
+PCO'nun klasörde bulunan `DS_pco_dimax_HD_113.pdf` veri föyüne göre HD+ modelinin
+tasarımı etkileyen başlıca değerleri:
+
+- Kamera ağırlığı: **7,9 kg** (lens hariç)
+- Kamera güç tüketimi: **80 W**; batarya şarjıyla 120 W
+- Besleme: **90–260 VAC**, opsiyonel 12 VDC
+- Çalışma sıcaklığı: **+5 °C ila +40 °C**
+- Çalışma nemi: **%10–90, yoğuşmasız**
+- Veri arayüzleri: USB 3.0, GigE/USB 2.0 ve Camera Link
+- Standart lens bağlantısı: F-mount
+- Operasyonel darbe: 30 g / 11 ms; titreşim: 25 g / 1–150 Hz
+
+Kamera, lens, muhafaza, termal sistem, silecek, rakor ve hareketli kabloların toplamı
+hesaplanmadan PTZ seçilemez. Kamera 7,9 kg olsa da gerçek hareketli kütlenin yaklaşık
+15–25 kg'a ulaşması mümkündür. Rüzgâr yüzeyi ve ağırlık merkezinin tilt ekseninden
+uzaklığı ayrıca tork oluşturur. Bu nedenle yalnızca 20 kg katalog yükü olan bir ünitenin
+sınırda kullanılması yerine ilk tasarım için **en az 30–50 kg sınıfı** istenmesi daha
+güvenlidir. Nihai seçim üreticinin dinamik tork hesabına dayanmalıdır.
+
+## 3. Aday karşılaştırma tablosu
+
+| Sıra | Üretici/marka | Ülke/şehir | Kanıtlanan ilgili kabiliyet | PCO projesine ilk uygunluk | Ana eksik/riski |
+|---:|---|---|---|---|---|
+| 1 | BIT-CCTV / Blue Icon | Çin, Tianjin | 3–150 kg PTZ; IP66, opsiyonel IP67/IP68; özel muhafaza, optik pencere, kablo, ısıtma/soğutma | Çok yüksek | İddia edilen IP/çevre testlerinin model bazlı üçüncü taraf raporu istenmeli |
+| 2 | Tianjin Zhongan | Çin, Tianjin | 30 kg ve 120 kg IP66 PTZ; büyük muhafaza; OEM/ODM | Yüksek | Aktif soğutma ve PCO arayüzlerinin özel tasarım kapsamı yazılı teyit edilmeli |
+| 3 | AIPTZ / JieShian | Çin, Shenzhen | 15–100 kg PTZ; IP66; özel kablo, açı, yazılım ve entegrasyon | Yüksek | Hazır ürün sayfalarında PCO boyutunda termal muhafaza kanıtı sınırlı |
+| 4 | Hangzhou SOAR | Çin, Hangzhou | Özel PTZ; IP66; ısıtıcı, fan, silecek, defog ve sıcaklık alarmı | Orta-yüksek | Yayımlanan ilgili muhafaza yalnız 5 kg iç yük taşıyor; yeniden mühendislik şart |
+| 5 | ZAEX / Zuoan | Çin, Changzhou | IP68, 304/316L, ATEX/IECEx seçenekleri; hava/su soğutmalı muhafaza | Termal muhafaza için yüksek | Hazır iç hacim PCO için küçük; ağır yük özel PTZ eşleşmesi belirsiz |
+| 6 | Hangzhou CQ Technology | Çin, Hangzhou | 30 kg ve 50 kg PTZ platformları; özel sistem entegrasyonu | Orta | Ürün sayfalarında muhafaza soğutması ve model bazlı IP belgesi yetersiz |
+| 7 | Fengtaida | Çin, Shenzhen/Dongguan | OEM/ODM, özel kalıp, IP66/IP67 metal PTZ ve deniz tipi çözümler | Orta | Açık kaynakta PCO boyutunda bağımsız ağır yük pozisyoner verisi yok |
+| 8 | Simis Group | Çin | Özel IP66/IP67/IP68 alüminyum/316L muhafaza dökümü ve işleme | Parça üreticisi olarak orta | PTZ motoru, kontrolü ve komple sistem entegrasyonu sunan ana yüklenici değil |
+
+“Uygunluk”, üreticilerin yayımladığı bilgilerden çıkarılan ön eleme sonucudur; bir ürün
+onayı veya saha performansı garantisi değildir.
+
+## 4. Ayrıntılı marka incelemeleri
+
+### 4.1 BIT-CCTV — Blue Icon (Tianjin) Technology Co., Ltd.
+
+**Neden birinci aday:** Firma yalnız PTZ kamera satmıyor; bağımsız pan-tilt
+pozisyonerleri, kamera muhafazaları, braketler ve özel entegrasyon hizmetini aynı ürün
+ailesinde sunuyor. Resmî şirket profilinde özel kamera muhafazası, optik pencere camı,
+kablo tesisatı, askerî tip konnektör, dönüş açısı ve koordinat geri bildiriminin projeye
+göre tasarlanabildiği açıkça belirtiliyor.
+
+İlgili ürünler ve kabiliyetler:
+
+- BIT-PT850: yaklaşık 50 kg sınıfında ağır yük pozisyoneri.
+- BIT-PT8100: 100 kg sınıfı, IP66, sürekli 360° pan, üstten veya yandan yükleme,
+  koordinat geri bildirimi ve yıldırım/darbe gerilimi koruması.
+- Üreticinin portföy beyanı 3–150 kg standart aralığı kapsıyor.
+- Özel çift pencereli muhafaza, silecek, fan, ısıtıcı ve aktif iklimlendirme seçenekleri
+  belirtiliyor.
+- Üretici IP66 standart ürünlerin yanında özel IP67/IP68 sızdırmazlık seçeneği sunduğunu
+  beyan ediyor.
+
+**PCO için muhtemel çözüm:** BIT-PT850 benzeri 50 kg pozisyoner + tek geniş optik
+pencereli özel alüminyum muhafaza + termostat kontrollü ısıtıcı/fan veya gerçek aktif
+soğutma + özel slip-ring/kablo geçişi. KameraLink veya USB 3.0'ın slip-ring üzerinden
+geçirilmesi varsayılmamalı; üreticiyle sinyal bütünlüğü testi yapılmalıdır. Alternatif
+olarak kesintisiz 360° yerine sınırlı pan açısı ve doğrudan kablo döngüsü seçilebilir.
+
+**Kanıt düzeyi:** Bu araştırmadaki en ayrıntılı resmî ürün verisine sahip aday. Bununla
+birlikte “IP67/IP68”, sıcaklık ve çevre dayanım iddiaları teklif edilen özel konfigürasyon
+için test raporuyla doğrulanmalıdır.
+
+Resmî kaynaklar:
+
+- [Şirket profili ve özel tasarım kabiliyetleri](https://www.bit-cctv.com/company-profile/)
+- [Ürün portföyü ve 3,5–120 kg sınıfları](https://www.bit-cctv.com/products/)
+- [BIT-PT8100 100 kg IP66 ağır yük pozisyoneri](https://www.bit-cctv.com/products/PT8100-100kg-load-outdoor-heavy-duty-pan-tilt-positioner.html)
+- [BIT-PT8100 teknik PDF](https://www.bit-cctv.com/uploads/file/20250919/BIT-PT8100_100kg_Load_Heavy_Duty_Pan_Tilt_Positioner.pdf)
+- [Üretici ana sayfası ve ağır yük ürün ailesi](https://www.pantiltpositioner.com/)
+
+İletişim: `sales@bit-cctv.com`, +86 139 2068 8922, Tianjin.
+
+### 4.2 Tianjin Zhongan Video Technology Co., Ltd.
+
+Zhongan bağımsız pan-tilt kafaları, büyük dış ortam muhafazaları ve patlamaya dayanıklı
+ürünler üretiyor. Firma OEM/ODM hizmetini açıkça sunuyor. İki ürün bu proje açısından
+özellikle anlamlı:
+
+- **ZA-PT540:** 30 kg taşıma kapasitesi ve IP66 koruma.
+- **ZA-PT8120:** 120 kg üst yük, sürekli 360° pan, ±45° tilt, ±0,1° konumlama,
+  RS485/RS422 ve Pelco P/D, IP66.
+- Ürün ailesinde silecekli büyük boy dış ortam kamera muhafazası bulunuyor.
+
+**PCO için muhtemel çözüm:** ZA-PT540 veya daha yüksek yük sınıfı üzerine özel
+boyutlandırılmış kamera kutusu. 30 kg sınıfı ancak lens, muhafaza ve ağırlık merkezi
+hesaplandıktan sonra kabul edilmelidir. 120 kg model teknik olarak rahat olsa da boyut,
+maliyet ve hareket hızı bakımından gereğinden büyük olabilir.
+
+**Eksik:** Yayımlanan sayfalarda aktif soğutma kapasitesi, muhafaza iç ölçüsü ve USB
+3.0/CameraLink sinyal aktarımı yeterince açıklanmıyor. Bunlar RFQ'da doğrudan sorulmalı.
+
+Resmî kaynaklar:
+
+- [Zhongan ana sayfası, ürün aileleri ve OEM/ODM beyanı](https://www.zhonganptz.net/)
+- [ZA-PT8120 120 kg IP66 ürün sayfası](https://www.zhonganptz.net/pan-tilt-head/za-pt8120-heavy-duty-top-loaded-pan-tilt-head.html)
+- [ZA-PT540 30 kg IP66 teknik PDF](https://www.zhonganptz.net/Content/upload/pdf/202312822/ZA-PT540-Medium-Duty-Motorized-Pan-Tilt-Positioner.pdf?rnd=610)
+- [Kamera muhafazası ürün ailesi](https://www.zhonganptz.net/camera-housing/)
+- [İletişim sayfası](https://www.zhonganptz.net/contact-us)
+
+İletişim: `yangqingye@chinazhongan.cn`, `zhanghongge@chinazhongan.cn`,
++86 22 8485 6666, Tianjin.
+
+### 4.3 AIPTZ — Shenzhen JieShian Electronic Technology Co., Ltd.
+
+AIPTZ, standart CCTV'den çok bağımsız motorlu pan-tilt platformlarına odaklanıyor.
+15/20/45/50/90/100 kg yük sınıfları ve proje bazlı entegrasyon hizmetleri listeleniyor.
+20 kg DU52H ürününde IP66, −35 °C ila +65 °C, RS485/RS422, RJ45 ve özel kablo çıkışları
+belirtilmiş. Firma standart model üzerinden dönüş açısı, kablo, yazılım ve mekanik
+özelleştirme yapabildiğini söylüyor.
+
+**Güçlü yanı:** Mekanik PTZ ve kontrol özelleştirmesi ayrıntılı. Teslim çevrimleri de
+ürün bazında yayımlanmış.
+
+**Zayıf yanı:** PCO Dimax kadar büyük ve ısı üreten üçüncü taraf kameraya özel, aktif
+soğutmalı muhafaza örneği açıkça gösterilmiyor. Bu nedenle ilk yazışmada “mevcut kamera
+ve lens tarafımızdan sağlanacak; yalnız entegrasyon isteniyor” ifadesi özellikle
+kullanılmalı.
+
+Resmî kaynaklar:
+
+- [AIPTZ ürün ailesi ve özel geliştirme hizmeti](https://en.aiptz.com/)
+- [15–20 kg DU52H, IP66 ve özel kablolama ayrıntıları](https://www.aiptz.com/en/DU52H.html)
+
+İletişim: `aiptz@jsa-cctv.com`, +86 755 8996 8730, Shenzhen.
+
+### 4.4 Hangzhou SOAR Security Technology Co., Ltd.
+
+SOAR, hazır CCTV modüllerinin yanı sıra özel uzun menzil PTZ sistemleri geliştiriyor.
+SOAR800-TH sayfasında IP66 pan-tilt, 360° sürekli dönüş, 330 mm'ye kadar motorlu lens
+alabilen muhafaza, silecek, yıkayıcı, fan, ısıtıcı, iç buğu giderme ve yüksek sıcaklık
+alarmı açıkça belirtilmiş.
+
+**Önemli uyumsuzluk:** Aynı sayfada sistem “20 kg medium load” olarak adlandırılsa da
+muhafazanın azami iç yükü **5 kg** verilmiş. PCO kamera gövdesi tek başına 7,9 kg olduğu
+için katalog ürünü doğrudan uygun değildir. SOAR ancak daha büyük özel gövde ve daha
+yüksek tilt torku tasarlamayı yazılı olarak kabul ederse değerlendirilmelidir.
+
+Resmî kaynaklar:
+
+- [SOAR800-TH özel IP66 PTZ/muhafaza sistemi](https://www.hzsoar.com/20kg-medium-load-long-range-ptz-for-border-security-product/)
+- [IP67 deniz tipi çift yük PTZ örneği](https://www.hzsoar.com/oem-heavy-duty-thermal-camera-factory-ip67-dual-payload-thermal-ptz-soar-product/)
+
+İletişim: `sales@hzsoar.com`, +86 158 5827 7138, Hangzhou.
+
+### 4.5 ZAEX — Changzhou Zuoan Electronics Co., Ltd.
+
+ZAEX bu listedeki en kuvvetli **endüstriyel muhafaza ve termal yönetim uzmanı**dır.
+Firma 304/316L paslanmaz, IP68, ATEX/IECEx/CNEx seçenekli sabit ve PTZ gövdeler
+sunuyor. Özellikle ZAFC106 muhafaza hava veya su soğutmalı olarak listelenmiş:
+
+- Hava soğutmalı kullanım: yaklaşık −25 °C ila +150 °C ortam
+- Su soğutmalı kullanım: yaklaşık 0 °C ila +250 °C ortam
+- IP68 ve 304/316L paslanmaz gövde
+- Yayımlanan iç hacim: 260 × 80 × 80 mm; PCO Dimax için açıkça küçüktür
+
+Dolayısıyla hazır ZAFC106 alınamaz; fakat üreticinin yüksek sıcaklık muhafazası tecrübesi,
+roket statik test alanındaki radyant ısı ve partikül yükü yüksekse değerlidir.
+
+**Kritik ayrım:** Patlamaya dayanıklılık sertifikası, roket motorunun basınç ve ısıl
+etkilerine dayanıklılık anlamına gelmez. Ayrıca özel olarak büyütülen gövde mevcut
+sertifikayı otomatik olarak devralmaz; yeni/uyarlanmış konfigürasyonun sertifika kapsamı
+kontrol edilmelidir.
+
+Resmî kaynaklar:
+
+- [Hava/su soğutmalı muhafaza ürün ailesi](https://en.zaex.com.cn/product_category/AIR-WATER-COOLING-HOUSING.html)
+- [ZAFC106 teknik PDF](https://en.zaex.com.cn/uploadfiles/107.151.154.230/webid516/uploadfile/201704/7251492996546682.pdf)
+- [IP68 patlamaya dayanıklı kamera muhafazaları](https://en.zaex.com.cn/product_category/Explosion-proof-camera-housing.html)
+- [ZAT610 IP68, termostatlı PTZ örneği](https://en.zaex.com.cn/product/ZAT610-Explosion-proof-PTZ-IR-camera.html)
+
+İletişim: `zaex@zaex.com.cn`, Changzhou, Jiangsu.
+
+### 4.6 Hangzhou CQ Technology
+
+CQ'nun resmî ürün sayfasında 30 kg üstten yüklemeli ve 50 kg alüminyum ağır yük
+pan-tilt platformları listeleniyor. Firma termal kamera, uzun menzil görüntüleme,
+pan-tilt ve sistem entegrasyonu alanlarında çalışıyor.
+
+**Değerlendirme:** Mekanik yük kapasitesi umut verici, fakat incelenen açık sayfalarda
+50 kg modelin IP sınıfı, termal muhafazası ve model bazlı çevresel test dokümanı yeterli
+değil. Ana kısa liste yanıt vermezse veya fiyat karşılaştırması gerekirse görüşülmeli.
+
+Resmî kaynaklar:
+
+- [CQ pan-tilt ürün ailesi](https://www.hzcqtech.com/products/Pan-Tilt.html)
+- [CQ iletişim sayfası](https://www.hzcqtech.com/contactus.html)
+
+İletişim: `sales@hzcqtech.com`, +86 571 8791 8727, Hangzhou.
+
+### 4.7 Fengtaida
+
+Fengtaida; Shenzhen ve Dongguan'da OEM/ODM, özel kalıp, EO/IR entegrasyonu, deniz tipi
+korozyon koruması ve IP66/IP67 metal PTZ çözümleri sunduğunu belirtiyor. Ağır hizmet
+silecek ve özel proje başvurusu da mevcut.
+
+**Değerlendirme:** Özel üretim altyapısı açısından olası adaydır; ancak açık kaynakta
+PCO gibi büyük üçüncü taraf bilimsel kamera için doğrulanabilir yük/tork değerine sahip
+bağımsız PTZ ürünü bulunamadı. Bu nedenle ikinci kademe adaydır.
+
+Resmî kaynak:
+
+- [Fengtaida üretim ve OEM/ODM kabiliyetleri](https://www.fengtaida.com/)
+
+İletişim: `sales6@fengtaida.com`.
+
+### 4.8 Simis Group
+
+Simis, alüminyum basınçlı döküm veya 316L paslanmazdan özel CCTV muhafaza parçaları
+üreten bir OEM döküm/işleme firmasıdır. IP66/IP67/IP68 ve IK10 hedefli özel gövde
+üretimi sunduğunu belirtiyor.
+
+**Değerlendirme:** Hazır komple PTZ çözüm tedarikçisi değildir. İlk beş adaydan biri
+muhafazayı kendi içinde yapamıyorsa veya Türkiye'de motor/kontrol entegrasyonu
+yapılacaksa özel gövde üreticisi olarak değerlendirilebilir. IP hedefi ancak nihai,
+tam monte ürün üzerinde akredite testle doğrulanmalıdır.
+
+Resmî kaynak:
+
+- [Simis özel CCTV muhafaza üretimi](https://www.simis-group.com/custom-cctv-camera-housing)
+
+## 5. Üreticilere gönderilecek teknik soru/RFQ listesi
+
+Markalara yalnız “IP67 PTZ yapabilir misiniz?” diye sorulması yeterli değildir. Aynı
+teknik paket tüm adaylara gönderilmeli ve cevaplar karşılaştırılmalıdır:
+
+1. PCO Dimax HD+ kamera datasheet'i, kamera gövdesinin ölçülü 3B modeli veya teknik
+   resmi ve gerçek kamera fotoğrafları.
+2. Kullanılacak F-mount lensin marka/modeli, ağırlığı, dış çapı, uzunluğu ve odak/iris
+   kontrol yöntemi.
+3. Kamera + lens ağırlık merkezi ve muhafaza içinde istenen montaj yönü.
+4. Dış ortam asgari/azami sıcaklığı, güneş radyasyonu, rokete uzaklık ve test sırasında
+   beklenen yüzey sıcaklığı/ısı akısı.
+5. Basınç darbesi, akustik seviye, titreşim spektrumu, partikül/kurum ve kimyasal
+   maruziyet verileri.
+6. İstenen pan/tilt açıları, hızları, hassasiyeti ve sürekli 360° dönüş gerekip
+   gerekmediği.
+7. PTZ hareket ederken kayıt yapılacaksa izin verilen görüntü titreşimi ve yerleşme
+   süresi.
+8. Kamera için 90–260 VAC/80 W besleme, tetikleme hatları, IRIG-B, GigE, USB 3.0 ve
+   CameraLink hatlarının hangilerinin muhafaza dışına çıkarılacağı.
+9. Kesintisiz dönüş isteniyorsa slip-ring'in gerçek veri standardı ve bant genişliği;
+   USB 3.0/CameraLink için üretici test raporu.
+10. Muhafaza iç sıcaklığını kamera çalışırken +5 ila +40 °C arasında tutacak hesaplanmış
+    ısıtma/soğutma kapasitesi. Sadece fan, dış ortamdan daha düşük sıcaklık oluşturmaz.
+11. Nem sensörü, çiy noktası kontrolü, termostat, alarm, kuru hava bağlantısı veya
+    değiştirilebilir desikant seçeneği.
+12. Optik pencerenin malzemesi, kalınlığı, geçirgenliği, düzlemselliği ve yüksek hızlı
+    görüntülemede bozulma/ghosting oluşturmayacağına dair veri.
+13. Silecek, yıkama/purge-air ve kolay değiştirilebilir kurban pencere seçeneği.
+14. Tam monte ürün için IP66/IP67 test standardı ve akredite laboratuvar raporu.
+15. Termal çevrim, tuz sisi gerekiyorsa korozyon, titreşim, şok, EMC ve kablo rakoru
+    test raporları.
+16. Üreticinin ısı yükü, rüzgâr alanı ve ağırlık merkezi dahil dinamik tork hesabı.
+17. Prototip adedi, NRE/mühendislik bedeli, teslim süresi, FAT prosedürü, garanti,
+    yedek parça ve teknik çizim/SDK teslim kapsamı.
+18. Türkiye'ye satış, son kullanıcı/end-use incelemesi, ihracat lisansı ve lojistik
+    kısıtları.
+
+## 6. Teklif değerlendirme kapıları
+
+Bir üretici aşağıdaki kanıtları sağlamadan “uygun” kabul edilmemelidir:
+
+- Özel muhafazanın kamera ve lensle ölçülü yerleşim çizimi
+- Toplam hareketli kütle ve üç eksende ağırlık merkezi hesabı
+- Rüzgâr ve tilt momentini içeren motor/redüktör güvenlik katsayısı
+- Kamera açıkken 80 W iç ısı yükünü içeren termal analiz veya iklim odası testi
+- Nihai kablo/rakor/konnektörlerle tam ürün IP test raporu
+- Gerçek veri arayüzüyle kayıt ve tetikleme testi
+- PTZ hareketi sonrası görüntü titreşimi/yerleşme testi
+- Yoğuşma önleme kontrol mantığı ve arıza alarmı
+- Optik pencerenin görüntü kalitesine etkisini gösteren kabul testi
+- Seri numaralı FAT raporu, yedek parça listesi ve garanti şartları
+
+CE, FCC, RoHS, ISO 9001 veya web sitesinde “IP67” logosu bulunması tek başına özel
+üretilen nihai sistemin uygunluğunu kanıtlamaz. Sertifikanın/rakorların tam model kodunu,
+laboratuvarı, rapor numarasını ve kapsamını görmek gerekir.
+
+## 7. Nihai satın alma önerisi
+
+İlk aşamada BIT-CCTV, Zhongan ve AIPTZ'ye aynı İngilizce RFQ paketi gönderilmelidir.
+SOAR'a ayrıca mevcut 5 kg muhafazasının PCO için ölçeklenip ölçeklenemeyeceği
+sorulmalıdır. Termal maruziyet ölçümleri yüksek çıkarsa ZAEX'ten özel hava/su soğutmalı
+gövde teklifi alınmalı; gerekirse bu gövde BIT-CCTV veya Zhongan pozisyoneriyle
+eşleştirilmelidir.
+
+Sipariş doğrudan seri üretim olarak verilmemeli; önce bir mühendislik prototipi,
+kamera/lensle fabrika kabul testi (FAT), ardından sahada kontrollü kabul testi
+yapılmalıdır.
+
+===========================================================================
+===========================================================================
+EK ARAŞTIRMA (2. TUR) — Batı/Avrupa Kaynaklı Sağlam Muhafaza, Hassas PTZ ve
+Füze/Roket Test Sahası Entegratörleri
+Tarih: 23 Temmuz 2026 — Bu bölüm yukarıdaki (Çin merkezli PTZ/CCTV üreticilerine
+odaklanan) 1. tur araştırmayı TAMAMLAYICI niteliktedir; farklı bir açıdan —
+ABD/Avrupa kaynaklı bilimsel/savunma enstrümantasyonu, test sahası
+entegratörleri ve yüksek hızlı kamera üreticilerinin kendi aksesuarları —
+bakılmıştır. Aşağıdaki tüm marka/link bilgileri gerçek WebSearch/WebFetch
+sonuçlarından alınmıştır, uydurulmamıştır.
+===========================================================================
+
+GİRİŞ / YÖNTEM (2. TUR)
+~20 WebSearch/WebFetch sorgusuyla; (A) çevresel/sağlam kamera muhafazaları,
+(B) 10-20+ kg taşıyabilen hassas ağır yük pan-tilt/gimbal sistemleri,
+(C) füze/roket test sahası optik izleme entegratörleri, ve (D) PCO'nun
+rakibi yüksek hızlı kamera üreticilerinin kendi çevresel/PTZ ürünleri
+araştırılmıştır. PCO.dimax'in boyutu (7,9kg gövde + F-mount lens) çoğu
+"kutu tipi" CCTV muhafazasının kapasitesini aştığından bu, muhtemelen
+ÖZEL MÜHENDİSLİK gerektiren bir proje olacaktır — bu durum ilgili yerlerde
+açıkça belirtilmiştir.
+
+---------------------------------------------------------------------------
+KATEGORİ A — Çevresel / Sağlam Kamera Muhafazaları (IP66/IP67, ısıtıcı+soğutucu)
+---------------------------------------------------------------------------
+
+1) Dotworkz (STXL Serisi / CoolDome / STXL-CD) — ABD
+   Web: https://dotworkz.com/ , https://shop.dotworkz.com/collections/stxl-series
+   Açıklama: "Extra-Large" (STXL) serisi, 500mm+ uzun zoom lensli büyük format
+   kameralar için tasarlanmış, IP66 su geçirmez + IK10 darbe dayanımlı, ABD'de
+   üretilen bir muhafaza hattı. CoolDome (STXL-CD) modeli entegre aktif
+   soğutma + ısıtıcı/blower kombinasyonu sunuyor ve doğrudan aşırı sıcak/soğuk
+   ortamlar için pazarlanıyor. Bulduğumuz kategoriler içinde PCO.dimax'in
+   büyüklüğüne (lens dahil) en yakın "kutudan çıkma" (off-the-shelf) ürün.
+   Kategori: A
+   Savunma/havacılık ilgisi: Ürün açıklamalarında "askeri üsler, sınır
+   güvenliği" gibi genel savunma/güvenlik uygulamalarından bahsediliyor;
+   roket/füze test sahası kullanımına dair özel bir referans BULUNAMADI.
+   Doğrulanamayan nokta: İç hacmin PCO.dimax gövdesi + ek soğutma donanımını
+   fiziksel olarak alıp almayacağı ve gerçek ağırlık taşıma kapasitesi PDF
+   spec sheet'inden teknik olarak doğrulanamadı (PDF ikili veri olarak
+   indirildi ama otomatik ayrıştırılamadı) — üretici ile doğrudan teyit gerekir.
+
+2) moviTHERM — ABD
+   Web: https://movitherm.com/product-category/enclosures/
+   Açıklama: IP66/IP67/IP69K anodize alüminyum ve paslanmaz çelik muhafazalar
+   üretiyor; ancak ürünleri esas olarak FLIR A-serisi termal kameralar (Axx/
+   Axxx) gibi KÜÇÜK sanayi/termal kameralar için tasarlanmış. PCO.dimax
+   gövdesi için muhtemelen çok küçük kalır.
+   Kategori: A (sınırlı uygunluk — küçük format)
+
+3) VA Imaging
+   Web: https://va-imaging.com/en-us/collections/enclosures-ip67-cameras
+   Açıklama: IP67 sertifikalı makine görüşü kamera muhafazaları; standart
+   model 40mm'e kadar, XL model 74mm çapa kadar lens kabul ediyor. AÇIKÇA
+   PCO.dimax + F-mount lens için ÇOK KÜÇÜK.
+   Kategori: A (uygun değil — sadece referans/karşılaştırma için not edildi)
+
+4) Will-Burt — ABD
+   Web: https://www.willburt.com/positioners/camera-housings/
+   Açıklama: IP66 dereceli, PTC dirençli ilerlemeli ısıtıcı (32W'a kadar) ve
+   opsiyonel fan soğutmalı güneş kalkanı sunan çevresel kamera muhafazaları.
+   En büyük modelin iç boyutu yaklaşık 65x18x17cm, ağırlığı 7-8kg civarı —
+   yine PCO.dimax gövdesi + lens için muhtemelen YETERSİZ BÜYÜKLÜKTE.
+   Kategori: A (sınırlı uygunluk — küçük format)
+
+5) 2B Security Systems ApS — Kopenhag yakını, Danimarka (bkz. Kategori B)
+   Web: https://www.2bsecurity.com/
+   Açıklama: PTZ sistemleri, pan-tilt üniteleri VE büyük zoom lensli kamera
+   muhafazaları birlikte üreten bir Avrupa firması; "özel tasarım" sistemler
+   sunuyorlar. Muhafaza + PTZ'yi TEK FİRMADAN alma ihtimali nedeniyle ayrıca
+   not edilmiştir.
+   Kategori: A + B
+
+[ÇIKARILDI — SVS-Vistek: bu bir marka/üretici değil, "kapalı kutu + iç ısı
+ yükü" probleminin özel mühendislikle nasıl çözüldüğüne dair bir teknik emsaldi;
+ PCO için satılabilir bir ürün/hizmet sunmadığından kısa listeden çıkarıldı.]
+
+GENEL DEĞERLENDİRME (A): Aranan ölçekte hazır (COTS) bir IP66/67 + aktif
+ısıtma/soğutma muhafazası NET OLARAK bulunamadı; en yakın aday Dotworkz
+STXL-CD ailesi. Muhtemelen ÖZEL İMALAT gerekecek; Dotworkz, 2B Security ve
+moviTHERM ile "custom/OEM" görüşmesi önerilir. (Not: 1. turdaki ZAEX/Zuoan
+gibi Çinli endüstriyel termal muhafaza uzmanları da bu kategoriye güçlü
+alternatifler sunuyor — bkz. yukarı.)
+
+---------------------------------------------------------------------------
+KATEGORİ B — Ağır Yük Hassas PTZ / Pan-Tilt Mount / Gimbal (10-20+ kg)
+---------------------------------------------------------------------------
+
+1) Quickset Defense Technologies (Quickset Inc.) — ABD
+   Web: https://www.quickset.com/
+   Açıklama: Savunma ve kritik altyapı için ağır yük pan-tilt pozisyonlayıcılar.
+   MPT-500: 1.260 lb'ye (~570kg) kadar yük, 500 lb-ft (678 Nm) tilt torku;
+   MPT-50: 75 lb (~34kg) yük / 50 lb-ft tork — PCO.dimax + lens + muhafaza
+   (12-20kg) için MPT-50 sınıfı daha uygun büyüklükte. MIL-spec dayanıklılık
+   iddiası; entegre GPS, HUMS (sağlık izleme) özellikleri var.
+   Kategori: B
+   Savunma/havacılık ilgisi: Firma "CBP, DHS ve NASA tarafından güvenilir"
+   olduğunu belirtiyor — doğrudan roket test sahası bağlamı doğrulanamadı
+   ama güçlü bir sinyal.
+
+2) UAVOS — Kıbrıs merkezli, uluslararası
+   Web: https://www.uavos.com/products/pan-tilt-platforms/pan-tilt-platform-ptp140/
+   Açıklama: PTP140 modeli, tam dinamikte 60kg, sınırlı dinamikte 130kg yük
+   taşıyabiliyor; IP65, entegre kayar halka (sürekli 360° dönüş), EO/IR
+   kamera gibi yükler için tasarlanmış. PCO.dimax + lens + IP67 muhafaza
+   ağırlığı (12-20kg) için rahatlıkla yeterli kapasite.
+   Kategori: B
+   Not: IP65 belirtilmiş (IP66/67 değil) — PTZ ünitesinin kendi motor/
+   elektronik gövdesinin dış hava koşullarına dayanıklılığı teyit edilmeli.
+
+3) Teledyne FLIR — Directed Perception PTU-D300 / D300E Serisi — ABD
+   Web: https://movitherm.com/product/flir-ptu-d300e-standard-pan-tilt-for-side-mounted-payloads-up-to-70-lbs/
+   Açıklama: 70 lb'ye (~32kg) kadar yük taşıyan, hava koşullarına dayanıklı
+   (weatherized), entegre kontrolcülü, %100 duty-cycle için tasarlanmış
+   sağlam pan-tilt ünitesi; hassas mutlak/bağıl pozisyon kontrolü.
+   Kategori: B
+
+4) Sagebrush Technology, Inc. — Albuquerque, New Mexico, ABD
+   Web: sagebrushtech.com (üçüncü taraf kaynaklardan bilgi; site doğrudan
+   fetch edilemedi)
+   Açıklama: Hassas gimbal/pozisyonlayıcı üreticisi. Model 20 (20 lb/9kg) ve
+   Model 30 (30+ lb/~14kg+) worm-gear tahrikli gimballer; ayrıca kablo
+   tahrikli (cable-driven) servo kontrollü özel gimballerle "onda bir
+   dereceden mikroradyan" seviyesinde açısal hassasiyet sağlanabildiği
+   belirtiliyor. Firma özel tasarım (custom) yapabiliyor — daha yüksek
+   kapasiteli özel versiyon istenebilir.
+   Kategori: B
+   Savunma/havacılık ilgisi: Hassas nişan alma/pointing çözümleri sunduğu
+   belirtiliyor; doğrudan bir roket/füze test sahası referansı bu aramada
+   BULUNAMADI/doğrulanamadı.
+
+5) Aerotech, Inc. — ABD
+   Web: https://www.aerotech.com/products/gimbals-optical-mounts-products/
+   Açıklama: AMG serisi doğrudan tahrikli gimballer, 2 arc-saniye hassasiyet;
+   "High Load Capacity Gimbal" 100kg+ yükleri arc-saniye hassasiyetinde
+   konumlandırabiliyor. Esas olarak laboratuvar/optik enstrümantasyon
+   (teleskop, büyük optik) uygulamalarına yönelik görünüyor; dış mekan/IP
+   derecelendirmesi bu aramada DOĞRULANAMADI.
+   Kategori: B (hassasiyet açısından güçlü aday, dış mekan uyumluluğu
+   ayrıca teyit edilmeli)
+
+6) BIT-CCTV (Shenzhen/Tianjin) — bkz. 1. tur, Bölüm 4.1 (BIT-PT850, 50kg)
+   — burada tekrar edilmedi, detaylar için yukarıya bakınız.
+
+7) 2B Security Systems ApS — Kopenhag yakını, Danimarka
+   Web: https://www.2bsecurity.com/
+   Açıklama: 1997'de kurulmuş; PTZ sistemleri, pan-tilt üniteleri, büyük
+   zoom lensli kamera muhafazaları üreten/dağıtan Avrupa firması. PT-2020
+   (20kg'a kadar) ve PT-2050 modelleri <0.1° hassasiyetli, worm gear'lı;
+   "özel tasarım pan-tilt pozisyonlayıcı ve uzun menzilli PTZ sistemleri"
+   sunduklarını belirtiyorlar. Avrupa'da yerleşik olması (Türkiye'ye ABD'den
+   daha yakın) ve hem muhafaza hem PTZ üretebilmesi nedeniyle ilginç bir aday.
+   Kategori: A + B
+
+GENEL DEĞERLENDİRME (B): Bu kategori "A"ya göre çok daha olgun bir pazar; hem
+güvenlik/gözetleme kökenli (Quickset, FLIR, 2B Security) hem hassas
+enstrümantasyon kökenli (Sagebrush, Aerotech, UAVOS) firmalar 12-20kg yük
+sınıfını rahatlıkla karşılıyor. En dengeli seçenekler: Quickset MPT-50, UAVOS
+PTP140, FLIR PTU-D300E, ve Sagebrush/2B Security'nin özel tasarım seçenekleri
+(1. turdaki BIT-CCTV/Zhongan/AIPTZ Çin menşeli ağır yük PTZ'leri de güçlü ve
+muhtemelen daha bütçe-dostu alternatifler olarak göz önünde bulundurulmalı).
+
+---------------------------------------------------------------------------
+KATEGORİ C — Füze/Roket Test Sahası Optik İzleme Entegratörleri (YÜKSEK ÖNCELİK)
+---------------------------------------------------------------------------
+
+[ÇIKARILDI — MARS Scientific: Roket/uzay aracı izleme konusunda güçlü bir
+ isim (NASA/SpaceX geçmişi dahil) ama araştırmada kendi ekipmanını KİRALAYAN/
+ GÖRÜNTÜLEME HİZMETİ SATAN bir servis sağlayıcı olarak görünüyor; müşteriye
+ donanım (muhafaza/PTZ) ÜRETİP SATTIĞINA dair kanıt bulunamadı. "Üretmeyenleri
+ sil" kriterine göre çıkarıldı — ileride danışmanlık/sistem entegrasyonu
+ ihtiyacı olursa tekrar değerlendirilebilir.]
+
+1) IBJ Elektronische Systeme GmbH (Techbel üzerinden temsil ediliyor) —
+   Delmenhorst, Almanya (Techbel: Belçika merkezli temsilci/partner)
+   Web: https://www.tech-bel.com/products-services/optical-tracking-mounts/
+   Açıklama: 30 yılı aşkın süredir askeri test sahaları için endüstriyel ve
+   askeri ekipman tasarımı/geliştirmesi/üretimi/entegrasyonu yapan bir firma.
+   Ana faaliyetleri: elektro-optik ve mekanik sistemlerin sistem mühendisliği;
+   askeri test sahalarına Optik İzleme Mountları, kontrol kabinleri, optik ve
+   yazılım kontrol operasyonları tedarik ediyorlar.
+   Kategori: C — ★★★ YÜKSEK ÖNCELİKLİ EŞLEŞME ★★★
+   Savunma/havacılık ilgisi: DOĞRUDAN — "askeri test sahaları" ana pazarları;
+   Avrupa'da yerleşik olmaları Türkiye'den erişim/lojistik açısından avantajlı
+   olabilir. Spesifik roket/füze test sahası proje referansı adıyla
+   DOĞRULANAMADI ama iş tanımı doğrudan örtüşüyor.
+
+[TAŞINDI — L3Harris Technologies (Kineto Tracking Mount / KTM): gerçek ve
+ doğrudan ilgili bir üründür ama büyük ölçekli savunma tedarikçisi olduğu ve
+ 1-10 adetlik küçük/özel siparişe yanaşıp yanaşmayacağı belirsiz olduğu için
+ silinmedi, dosyanın en altındaki "Büyük Ölçekli / Küçük Siparişe Muhtemelen
+ Yanaşmayacak Firmalar" bölümüne taşındı.]
+
+[ÇIKARILDI — Kollmorgen: tam bir izleme mountu/entegratör değil, yalnızca
+ motor/aktüatör BİLEŞENİ üreten bir alt-tedarikçi; aradığımız komple ürünü
+ (muhafaza+PTZ) üretmiyor. "Üretmeyenleri sil" kriterine göre çıkarıldı.]
+
+[ÇIKARILDI — Contraves (Rheinmetall)/HENSOLDT EOTS: güncel bir test sahası
+ kamera izleme mountu ürünü olduğu doğrulanamadı; büyük ölçüde tarihsel/
+ dolaylı referans ve günümüzde asıl ürün hattı silah hedefleme sistemi, test
+ sahası enstrümantasyonu değil. Çıkarıldı.]
+
+[ÇIKARILDI — Image Systems / TrackEye: bu bir donanım (muhafaza/PTZ) ürünü
+ değil, YAZILIM ürünü; "üretmeyenleri sil" kriterine tam uyuyor. Çıkarıldı.]
+
+2) Cordin Company — Salt Lake City, Utah, ABD
+   Web: https://www.cordin.com/
+   Açıklama: 40+ yıldır ultra yüksek hızlı görüntüleme teknolojisinde
+   (döner ayna tabanlı çerçeveleme ve streak kameralar) dünya lideri. Los
+   Alamos Ulusal Laboratuvarı gibi balistik test sahaları için döner aynalı
+   kameralara özel LENS MUHAFAZALARI üretiyorlar; patlayıcı testi, çarpma
+   balistiği ve senkro-balistik görüntüleme uygulamalarında kullanılıyorlar.
+   Kategori: C/D sınırında — patlayıcı/balistik test sahası için ÖZEL
+   MUHAFAZA ÜRETEN bir firma olarak somut bir emsal.
+   Savunma/havacılık ilgisi: DOĞRUDAN (balistik/patlayıcı test sahaları) —
+   ancak teknolojileri kendi döner-ayna/streak kameraları için; PCO.dimax
+   gibi dijital bir kameraya üçüncü parti muhafaza üretip üretmeyecekleri
+   DOĞRULANAMADI, ama "özel test sahası kamera muhafazası mühendisliği"
+   konusunda kanıtlanmış yetkinlikleri olan bir firma.
+
+GENEL DEĞERLENDİRME (C): Gerçekten var olan ama küçük/niş bir sektör —
+doğrulama beklentisi haklı çıktı. "Üretmeyenleri sil" kararı sonrası bu
+kategoride gerçekten donanım üreten/entegre eden iki aday kaldı: IBJ
+Elektronische Systeme/Techbel (Almanya/Belçika, askeri test sahası optik
+izleme mount'u tasarım+üretim+entegrasyonu — en somut ve öncelikli temas) ve
+Cordin Company (ABD, balistik/patlayıcı test sahaları için özel kamera lens
+muhafazası üretme deneyimi). MARS Scientific (hizmet sağlayıcı, donanım
+satışı doğrulanamadı), Kollmorgen (yalnız motor bileşeni üretiyor, komple
+sistem değil), Contraves/HENSOLDT (güncel ürün değil, tarihsel) ve TrackEye
+(yazılım, donanım değil) bu nedenle çıkarıldı. L3Harris KTM gerçek bir
+üründür ama büyük ölçekli devlet/savunma tedarik zincirinin parçası olduğu ve
+1-10 adetlik küçük/özel siparişe yanaşıp yanaşmayacağı belirsiz olduğu için
+silinmek yerine dosyanın en altındaki ayrı bölüme taşındı.
+
+---------------------------------------------------------------------------
+KATEGORİ D — [TAMAMEN ÇIKARILDI]
+---------------------------------------------------------------------------
+
+Bu kategoride araştırılan 5 firmanın (AOS Technologies, Optronis, nac Image
+Technology, Vision Research/Phantom, Photron) HİÇBİRİNİN kendi markalı
+çevresel muhafaza veya PTZ ürünü satmadığı doğrulanmıştı — hepsi "kendi
+ürünleri yok" negatif sonucuyla işaretliydi. "Üretmeyenleri sil" kararı
+sonrası kategori bütünüyle kaldırıldı. Tek genel çıkarım korunuyor: bu
+kamera üreticileri sektörde IP66/67+ısıtma/soğutma+PTZ ihtiyacını üçüncü
+parti entegratörlere (yukarıdaki Kategori C) veya genel endüstriyel muhafaza
+(Kategori A, hem Batılı hem 1. turdaki Çinli firmalar) bırakıyor. nac Image
+Technology'nin "Range & Ballistics" / "Aerospace & Defense" sayfaları, bu
+pazarda kimin müşteri olduğuna dair faydalı bir sinyal ama nac'ın kendisi
+muhafaza/PTZ tedarikçisi değil.
+
+---------------------------------------------------------------------------
+SONRAKİ ADIMLAR / ÖNERİLER (2. TUR)
+---------------------------------------------------------------------------
+
+1. İLK TEMAS İÇİN EN ÖNCELİKLİ FİRMA (test sahası entegratörü açısından):
+   IBJ Elektronische Systeme / Techbel (Almanya/Belçika). Doğrudan "askeri/
+   roket test sahası optik izleme mount'u" tasarım+üretim+entegrasyon işini
+   yapıyor; kendi entegre çözümünü teklif edebilir veya hangi alt
+   tedarikçilerle (muhafaza + PTZ) çalıştığını yönlendirebilir. Avrupa'da
+   olması, Türkiye'den lojistik/ihracat kontrolü açısından (ABD kaynaklı
+   ITAR kısıtlamalarına kıyasla) daha kolay olabilir. (MARS Scientific bu
+   listeden çıkarıldı — bkz. Kategori C notu: donanım üreticisi değil,
+   görüntüleme hizmeti sağlayıcısı olduğu için.)
+
+2. MUHAFAZA (A) İÇİN: Dotworkz (STXL-CD ailesi) ile "büyük format, özel iç
+   montaj" ihtiyacı için doğrudan mühendislik/teklif görüşmesi önerilir.
+   Paralel olarak 2B Security (Danimarka) ile görüşülmeli — hem muhafaza
+   hem PTZ üretebiliyorlar ve "özel tasarım" konusunda açıkça istekliler;
+   TEK TEDARİKÇİDEN entegre çözüm alma ihtimali burada en yüksek. 1. turdaki
+   ZAEX (Çin) da yüksek sıcaklık/hava-su soğutmalı muhafaza uzmanlığı
+   nedeniyle bu görüşmelere paralel dahil edilmeli.
+
+3. PTZ (B) İÇİN: Quickset MPT-50, UAVOS PTP140 ve FLIR Directed Perception
+   PTU-D300E somut, doğrulanmış, 12-20kg sınıfını rahatça karşılayan üç
+   "hazır platform" adayı olarak kısa listeye alınabilir (1. turdaki BIT-
+   CCTV/Zhongan/AIPTZ Çin menşeli ağır yük PTZ'leri de fiyat karşılaştırması
+   için paralel görüşülmeli). En yüksek hassasiyet gerekiyorsa Sagebrush
+   Technology veya Aerotech ile özel konfigürasyon görüşülebilir (dış
+   mekan/IP derecelendirmesi teyit edilmeli).
+
+4. BÜTÇE VE SÜRE BEKLENTİSİ: Hem Kategori A hem C'deki bulgular, bunun
+   "kataloğdan sipariş" değil, büyük ölçüde ÖZEL MÜHENDİSLİK gerektiren bir
+   proje olacağını gösteriyor — bu, 1. turun genel sonucuyla tamamen
+   uyumludur. Cordin Company (balistik/patlayıcı test sahaları için özel
+   lens muhafazası tasarlama konusunda kanıtlanmış deneyimi olan bir firma)
+   ve yukarıdaki entegratörlerle görüşülürken bu beklenti baştan
+   netleştirilmeli; teklif sürecinde kamera + lens + hedef ısı/nem/toz
+   koşulları + PTZ hareket profili gibi tam teknik şartnamenin (bkz. Bölüm 5,
+   1. tur RFQ soru listesi) paylaşılması gerekecektir.
+
+NOT: Bu bölümde adı geçen hiçbir marka/ürün/URL uydurulmamıştır; her biri
+gerçek WebSearch/WebFetch sonuçlarına dayanmaktadır. Doğrulanamayan veya
+şüpheli noktalar (ör. gerçek iç hacim/ağırlık kapasitesi, spesifik roket
+test sahası proje referansları) ilgili firma girdisinin altında açıkça
+"doğrulanamadı" olarak işaretlenmiştir. Nihai tedarikçi seçiminden önce her
+firma ile doğrudan teknik görüşme ve teklif alınması şiddetle önerilir.
+
+===========================================================================
+===========================================================================
+LİSTE TEMİZLİĞİ NOTU (3. TUR) — 23 Temmuz 2026
+Şu an hedef üretim miktarı 1-10 adet (küçük seri/prototip). Bu doğrultuda
+yukarıdaki listeler gözden geçirildi: gerçekten donanım ÜRETMEYEN firmalar
+(salt hizmet sağlayıcı, salt yazılım, salt bileşen alt-yüklenicisi, güncel
+olmayan/tarihsel ürün) listeden ÇIKARILDI — bkz. ilgili bölümlerdeki
+[ÇIKARILDI — ...] notları (SVS-Vistek, MARS Scientific, Kollmorgen,
+Contraves/HENSOLDT, Image Systems/TrackEye, ve tüm Kategori D). Büyük
+ölçekli devlet/savunma tedarikçisi olup 1-10 adetlik küçük/özel siparişe
+yanaşıp yanaşmayacağı belirsiz olan ama GERÇEKTEN donanım üreten firmalar
+silinmedi; aşağıya, ayrı bir referans bölümüne taşındı.
+===========================================================================
+
+---------------------------------------------------------------------------
+BÜYÜK ÖLÇEKLİ / 1-10 ADETLİK KÜÇÜK-ÖZEL SİPARİŞE MUHTEMELEN YANAŞMAYACAK
+FİRMALAR (silinmedi, yalnız referans için ayrı tutuldu)
+---------------------------------------------------------------------------
+
+1) L3Harris Technologies — Kineto Tracking Mount (KTM) — ABD
+   Web: https://www.l3harris.com/all-capabilities/kineto-tracking-mount
+   Açıklama: KTM, hızlı hareket eden objeleri (füze, roket) hassas izlemek
+   ve zaman-mekan-konum bilgisi (TSPI) sağlamak için tasarlanmış; torklu
+   motor tahrikli, titremesiz izleme. Modüler sensör entegrasyonu (ray
+   sistemi) ile farklı sensör paketleri hızlıca monte edilip optik
+   hizalanabiliyor. White Sands Füze Test Sahası'nda 1992'de eski
+   cinetheodolite sistemlerinin yerini almış; "range'in iş atı" (workhorse),
+   ~40 yıldır kullanımda.
+   Neden burada: Gerçek ve doğrudan ilgili bir üründür (bu araştırmadaki en
+   güçlü "ne mümkün" referanslarından biri) ama L3Harris çok büyük bir devlet/
+   savunma tedarikçisi; Türkiye'den özel bir şirketin 1-10 adetlik küçük
+   siparişine yanaşıp yanaşmayacağı, ihracat kontrolü (ITAR benzeri)
+   kısıtlarına takılıp takılmayacağı DOĞRULANAMADI. Bütçe/zaman çok
+   esnekse veya devlet/kurumsal kanaldan erişim mümkünse yeniden
+   değerlendirilebilir; aksi halde şu anki 1-10 adetlik hedef için birincil
+   aday DEĞİLDİR.
+
+NOT: Bu bölüme başka firma eklenmedi çünkü diğer "büyük ölçekli" adaylar
+(Kollmorgen, Contraves/HENSOLDT) zaten "gerçekten donanım üretmiyor/güncel
+değil" gerekçesiyle tamamen çıkarıldı — bkz. Kategori C notları.

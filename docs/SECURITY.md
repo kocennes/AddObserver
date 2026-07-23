@@ -1,8 +1,8 @@
 # Güvenlik standardı
 
 **Durum:** Kabul edildi  
-**Son gözden geçirme:** 2026-07-18
-**Sonraki gözden geçirme:** 2026-10-17
+**Son gözden geçirme:** 2026-07-22
+**Sonraki gözden geçirme:** 2026-10-22
 
 ## Amaç
 
@@ -240,7 +240,7 @@ logging) eklendiğinde bu tablo aynı değişiklikte güncellenir.
 | B6 | DB (SQLite prototip; production Postgres — `todo.md` 4.x) | Evet (uygulama süreci) | Principal-scoped repository filtreleri birinci katman; production Alembic RLS migration'ı, transaction-local principal context helper'ı, PostgreSQL transaction helper'ı ve ilk SQLAlchemy repository dilimi (`principal`, `oauth_client_grant`, `ads_account`, `oauth_credential`) eklendi. `ADDOBSERVER_POSTGRES_TEST_DSN` ile çalışan canlı PostgreSQL izolasyon testi var, fakat bu ortamda DSN olmadığı ve kalan production repository/app yolları henüz SQLAlchemy'ye taşınmadığı için 4.3 açık. |
 | B7 | Vault (yerel Fernet — `auth/vault.py`; production KMS — `todo.md` 10.6) | Evet (uygulama süreci) | Refresh token/secret yalnız burada düz metin; DB'de yalnız referans/hash. |
 | B8 | Queue / async worker | Yok | Henüz uygulanmadı; ARCHITECTURE.md bileşen listesinde yer alsa da kod karşılığı yok — bu tehdit modelinde "N/A, eklenince genişletilir" olarak işaretli. |
-| B9 | Observability (structured log/trace) | Yok | Faz 9.1 açık; bugün `backend/src`'de `logging`/`print` çağrısı yok (bkz. Faz 2.2 kanıtı), bu yüzden "log'a sızma" bugün gerçek bir yüzey değil. |
+| B9 | Observability (structured log/trace) | Evet (uygulama süreci) | Faz 9.1'de uygulandı: `backend/src/observability/logging.py::JsonEventLogger` sabit şemalı, allowlist-only JSON event yayınlar (serbest metin/exception gövdesi hiçbir zaman alan olarak kabul edilmez); principal/customer yalnız HMAC pseudonym referansı olarak görünür; `ObservabilityMiddleware` (`app.py`) her HTTP isteğini bununla loglar. |
 | B10 | Google Ads API (upstream) | Hayır (dış taraf) | Bugün hiç mutate çağrısı yok (Faz 8 tamamı bloke); yalnız reporting adapter'ı devrede. |
 
 ### Tehdit envanteri
@@ -257,10 +257,10 @@ logging) eklendiğinde bu tablo aynı değişiklikte güncellenir.
 | T8 | Authorization code / state replay (Kurcalama) | B3↔B4 | Kod tek kullanımlık atomik `UPDATE ... WHERE consumed_at IS NULL` ile claim edilir; `state` kısa ömürlü ve callback'te tüketilir. | `backend/tests/test_auth_authorization_flow_http.py` (ikinci `/token` denemesi `invalid_grant`), `backend/tests/test_oauth_store.py::ConcurrentAuthorizationCodeClaimTests` (gerçek iki-thread race) | Yok. |
 | T9 | Session fixation / çalıntı `web_session` çerezinin disconnect sonrası hâlâ geçerli kalması (Kimlik sahteciliği) | B5↔B6 | Her girişte taze `secrets.token_urlsafe` session+CSRF çifti (fixation yok); `disconnect_principal` principal'ın **tüm** `web_session` satırlarını iptal eder, yalnız isteği yapan çerezi değil. | `backend/tests/test_auth_web_session.py`, `backend/tests/test_auth_disconnect.py` | Riskli eylemler için re-auth/step-up eşiği henüz kararlaştırılmadı (`todo.md` 7.3, WRITE kapsamı sonrasına bloke). |
 | T10 | Audit kurcalama / geçmiş olayın değiştirilmesi-silinmesi (Kurcalama, İnkar) | B2/B3/B5→B6 | `AuditRepository` yalnız `insert`/`list_for_principal` sağlar; update/delete metodu yoktur. Proposal/approval/audit tek transaction'da atomik yazılır; audit açılamazsa karar fail-closed kalır. | `db/proposals.py::AuditRepository`, `db/proposals.py::ApprovalRepository.save_decision_with_audit` | Üretim WORM/append-only depo sağlayıcısı henüz seçilmedi (`todo.md` 9.3) — bugünkü koruma yalnız "uygulama kodu update/delete sunmuyor" seviyesinde, DB dosyasına doğrudan erişimi ayrıca engellemez. |
-| T11 | Bağımlılık/tedarik zinciri kompromisi (Kurcalama, Bilgi ifşası) | Repo → B2/B3 | SAST (Bandit), secret tarama (detect-secrets), dependency scan (pip-audit) araç seti ADR ile kabul edildi ve pin'lendi. | `docs/decisions/0003-dev-tooling.md`, `backend/pyproject.toml` | Reproducible lockfile (`uv.lock`) henüz üretilmedi (`todo.md` 10.1); CI'da otomatik gate henüz yok (`todo.md` 10.2) — bugün yalnız yerel/manuel çalıştırma. |
+| T11 | Bağımlılık/tedarik zinciri kompromisi (Kurcalama, Bilgi ifşası) | Repo → B2/B3 | SAST (Bandit), secret tarama (detect-secrets), dependency scan (pip-audit) araç seti ADR ile kabul edildi ve pin'lendi; `backend/uv.lock` reproducible lockfile'ı üretildi; `.github/workflows/ci.yml` bunların hepsini ayrı, minimum yetkili job'larda zorunlu kapı olarak çalıştırır. | `docs/decisions/0003-dev-tooling.md`, `backend/pyproject.toml`, `backend/uv.lock`, `.github/workflows/ci.yml` | Container/supply-chain imzalama ve SBOM/provenance doğrulaması ayrı bir kapı (`todo.md` 10.3); hosting sağlayıcısı seçilmeden bu job'ların gerçek production branch koruması olarak zorunlu kılınması doğrulanamaz (`todo.md` 10.4/10.8). |
 | T12 | Yetkisiz Google Ads mutate (Yetki yükseltme, İnkar) | B2→B10 | Bugün kod tabanında Google Ads'e giden hiçbir mutate çağrısı yok (Faz 8 tamamı bloke); `prepare_proposal` yalnız kendi DB'mize yazar. `test_prompt_injection_safety.py` bir proposal'ın otomatik onaylanamadığını (durumun `pending_approval` kaldığını) ayrıca kanıtlıyor. | `mcp/proposals.py`, `backend/tests/test_prompt_injection_safety.py` | Faz 8 açıldığında revalidation/reservation/idempotency/reconciliation kontrolleri bu tehdit modeline yeni satırlar olarak eklenmelidir; bugün "yok" denmesinin nedeni özellik eksikliği, tasarım kanıtı değil. |
 | T13 | Kaynak tükenmesi / adil olmayan kullanım — bir principal'ın diğerlerini quota/latency açısından aç bırakması (Hizmet reddi) | B1→B2/B10 | Yok — rate limiting/fair-queue katmanı henüz uygulanmadı. | — | Açık artık risk (`todo.md` 6.7); Google Ads Basic Access sınırı (15.000 işlem/24 saat) tüm principal'lar için tek paylaşılan bütçe, şu an principal bazında bölünmüyor. |
-| T14 | Log/trace/hata cevabına secret veya PII sızıntısı (Bilgi ifşası) | B2/B3→B9 | Yapısal logging henüz eklenmedi (bugün gerçek yüzey yok); secret taşıyan yedi dataclass önceden `repr=False` ile korunuyor; sınıflandırılamayan exception metni public hata mesajına hiç taşınmıyor. | `backend/tests/test_secret_redaction.py`, `backend/tests/test_api_errors.py::test_unrecognised_exception_text_never_reaches_the_public_message` | Faz 9.1 (yapısal logging) açıldığında redaction'ın gerçek log çıktısı üzerinden yeniden doğrulanması gerekir — bugünkü kanıt yalnız `repr()`/mesaj seviyesinde. |
+| T14 | Log/trace/hata cevabına secret veya PII sızıntısı (Bilgi ifşası) | B2/B3→B9 | Faz 9.1'de kapatıldı: `JsonEventLogger` sabit şemalı allowlist'tir, serbest metin/exception gövdesi hiçbir zaman bir alan olarak kabul edilmez; kontrol karakteri/yüksek-kardinaliteli/hassas serbest metin alanları `unknown`'a düşürülür; secret taşıyan yedi dataclass ayrıca `repr=False` ile korunur; sınıflandırılamayan exception metni public hata mesajına hiç taşınmaz. | `backend/tests/test_observability.py` (gerçek log çıktısı üzerinden), `backend/tests/test_secret_redaction.py`, `backend/tests/test_api_errors.py::test_unrecognised_exception_text_never_reaches_the_public_message` | Yok — Faz 13.1 denetiminde bu satırın hâlâ "Faz 9.1 açık" dediği fark edildi ve düzeltildi; gerçek risk kapatılmıştı, yalnız belge güncel değildi. |
 
 ### Açık sorular
 
@@ -270,6 +270,14 @@ logging) eklendiğinde bu tablo aynı değişiklikte güncellenir.
 
 ## Güncelleme geçmişi
 
+- 2026-07-22 — Faz 13.1 production readiness review: tehdit modeli iki satırda stale bulundu ve
+  düzeltildi. (1) B9/T14 hâlâ "yapısal logging yok, Faz 9.1 açık" diyordu; oysa Faz 9.1 zaten uygulanmış
+  (`backend/src/observability/logging.py::JsonEventLogger`, allowlist-only sabit şema, gerçek log
+  çıktısı üzerinden `test_observability.py` ile kanıtlı) — B9 "Evet", T14 "Yok" (kapalı) olarak
+  güncellendi. (2) T11 hâlâ "`uv.lock` üretilmedi, CI gate yok" diyordu; oysa `todo.md` 10.1/10.2 zaten
+  `[x]` ve `backend/uv.lock`/`.github/workflows/ci.yml` gerçekten mevcut — kanıt ve artık risk buna göre
+  düzeltildi (kalan gerçek açık: container/supply-chain imzalama 10.3, hosting sağlayıcısı 10.4/10.8).
+  Kod değişikliği gerekmedi, yalnız belge kodun gerisinde kalmıştı.
 - 2026-07-19 — PostgreSQL reporting credential çözümlemesi metadata, vault ve provider aşamalarına ayrıldı;
   secret/vault ve Google Ads ağ çağrıları açık DB transaction içinde yürütülmez.
 - 2026-07-19 — Refresh-token replay family revocation'ının PostgreSQL transaction'da rollback olması

@@ -21,9 +21,6 @@ from .errors import AdsApiError, ErrorClass
 #: review criterion (docs/RATE_LIMITS.md, docs/API_CONTRACTS.md).
 MAX_DATE_RANGE_DAYS = 90
 
-DEFAULT_PAGE_SIZE = 100
-MAX_PAGE_SIZE = 1000
-
 _CUSTOMER_ID_RE = re.compile(r"^\d{10}$")
 
 
@@ -42,17 +39,6 @@ def validate_customer_id(customer_id: str) -> str:
             request_id=None,
         )
     return customer_id
-
-
-def validate_page_size(page_size: int) -> int:
-    if not (1 <= page_size <= MAX_PAGE_SIZE):
-        raise AdsApiError(
-            error_class=ErrorClass.VALIDATION,
-            code="invalid_page_size",
-            message=f"page_size 1 ile {MAX_PAGE_SIZE} arasinda olmalidir.",
-            request_id=None,
-        )
-    return page_size
 
 
 @dataclass(frozen=True, slots=True)

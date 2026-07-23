@@ -1,0 +1,220 @@
+Subject: Do you have existing products suitable for this camera's specifications?
+Hello,
+
+We are Bisavunma, a Turkey-based defense & systems integration company. We
+are evaluating options for an outdoor, continuously-operating installation
+of a high-speed industrial camera (specifications below), and before
+considering a custom design, we would like to ask whether you already have
+existing/standard products that could be suitable — namely:
+
+1. An environmental housing rated IP66/IP67, with active heating and
+   cooling, sized to fit a camera body plus an F-mount lens (see
+   dimensions below).
+2. A heavy-duty PTZ (pan-tilt) positioner rated for the weight class
+   below (camera + lens + housing, estimated ~15-25 kg combined).
+
+CAMERA SPECIFICATIONS (reference class: PCO.dimax HD/HD+)
+https://hikmicroturkiye.com/wp-content/uploads/2026/07/DS_pco_dimax_HD_113.pdf
+- Sensor: CMOS, global (snapshot) shutter
+- Resolution / max. frame rate (full frame): HD 1920x1080 @ 2128 fps,
+  HD+ 1920x1440 @ 1603 fps
+- Camera body weight: 7.9 kg (lens not included)
+- Approx. body dimensions: ~160 x 196 x 150 mm (W x H x D), plus F-mount
+  lens adapter length (~282 mm overall with a typical lens, ~23 mm
+  adjustable back-focus)
+- Power supply: 90-260 VAC (12 VDC optional); power consumption 80 W
+  (120 W while battery charging)
+- Rated ambient operating temperature: +5°C to +40°C
+- Rated operating humidity: 10-90%, non-condensing
+- Storage temperature range: -20°C to +70°C
+- Lens mount: F-mount (standard), C-mount (optional adapter)
+- Data/control interfaces: USB 3.0, GigE/USB 2.0, Camera Link
+- Operational shock rating (camera itself): 30 g @ 11 ms, half-sine, all axes
+- Operational vibration rating (camera itself): 25 g @ 1-150 Hz, all axes
+
+QUESTIONS FOR YOU
+1. Do you have an existing housing model that fits this size camera+lens
+   and offers IP66/IP67 with active heating and cooling?
+2. Do you have an existing PTZ/pan-tilt positioner rated for this weight
+   class?
+3. If there isn't an exact match, what is your closest standard model, and
+   could it be adapted to this camera?
+4. Can you support small order quantities (roughly 1-10 units)?
+
+We'd be happy to share further details if there's a potential fit. Looking
+forward to your response.
+
+Best regards,
+Bisavunma
+Enes Koc / Engineer
+enes.koc@bisavunma.com / +90 555 617 7435
+Türkiye
+
+-----------
+
+Konu: Bu kamera özelliklerine uygun mevcut/hazır ürününüz var mı?
+
+Merhaba,
+
+Biz Bisavunma, Türkiye merkezli bir savunma ve sistem entegrasyonu
+şirketiyiz. Yüksek hızlı bir endüstriyel kameranın (özellikleri aşağıda)
+dış ortamda kalıcı ve sürekli çalışacak şekilde kurulumu için seçenekleri
+değerlendiriyoruz. Özel bir tasarım düşünmeden önce, şu an elinizde bu
+ihtiyaca uygun hazır/standart bir ürün olup olmadığını sormak istedik:
+
+1. Kamera gövdesi ve F-mount lensi alacak büyüklükte, aktif ısıtma ve
+   soğutmalı, IP66/IP67 seviyesinde bir dış ortam muhafazası (ölçüler
+   aşağıda).
+2. Aşağıdaki ağırlık sınıfına (kamera + lens + muhafaza, toplam tahmini
+   ~15-25 kg) uygun ağır hizmet tipi bir PTZ (pan-tilt) konumlandırıcı.
+
+KAMERA ÖZELLİKLERİ (referans sınıf: PCO.dimax HD/HD+)
+- Sensör: CMOS, global (anlık) shutter
+- Çözünürlük / azami kare hızı (tam kare): HD 1920x1080 @ 2128 fps,
+  HD+ 1920x1440 @ 1603 fps
+- Kamera gövde ağırlığı: 7,9 kg (lens hariç)
+- Yaklaşık gövde ölçüleri: ~160 x 196 x 150 mm (G x Y x D), artı F-mount
+  lens adaptörü uzunluğu (tipik bir lensle toplam ~282 mm, ~23 mm
+  ayarlanabilir back-focus)
+- Güç kaynağı: 90-260 VAC (opsiyonel 12 VDC); güç tüketimi 80 W
+  (batarya şarj olurken 120 W)
+- Nominal ortam çalışma sıcaklığı: +5°C ile +40°C
+- Nominal çalışma nemi: %10-90, yoğuşmasız
+- Saklama sıcaklığı aralığı: -20°C ile +70°C
+- Lens bağlantısı: F-mount (standart), C-mount (opsiyonel adaptör)
+- Veri/kontrol arayüzleri: USB 3.0, GigE/USB 2.0, Camera Link
+- Çalışma şoku değeri (kameranın kendisi): 30 g / 11 ms, yarım sinüs, tüm eksenler
+- Çalışma titreşimi değeri (kameranın kendisi): 25 g / 1-150 Hz, tüm eksenler
+
+SİZE SORULARIMIZ
+1. Bu boyuttaki kamera+lensi alacak, IP66/IP67 seviyesinde, aktif ısıtma
+   ve soğutmalı hazır bir muhafaza modeliniz var mı?
+2. Bu ağırlık sınıfına uygun hazır bir PTZ/pan-tilt konumlandırıcınız
+   var mı?
+3. Tam uyan bir model yoksa, en yakın standart modeliniz hangisi ve bu
+   kameraya uyarlanabilir mi?
+4. Küçük sipariş miktarlarını (yaklaşık 1-10 adet) destekleyebilir
+   misiniz?
+
+Uygun bir eşleşme varsa daha fazla detayı paylaşmaktan memnuniyet duyarız.
+Yanıtınızı bekliyoruz.
+
+Saygılarımla,
+Bisavunma
+Enes Koc / Engineer
+enes.koc@bisavunma.com / +90 555 617 7435
+Türkiye
+
+-----------------
+
+UYGUN ŞİRKETLERİN WEB SİTELERİ (markalar dosyasındaki güncel kısa liste)
+
+Kategori A — Muhafaza (IP66/67, ısıtmalı/soğutmalı) üreticileri
+-[X] BIT-CCTV / Blue Icon: https://www.bit-cctv.com/  (ağır yük ürünleri: https://www.pantiltpositioner.com/)
+- Tianjin Zhongan: https://www.zhonganptz.net/
+-[X] AIPTZ / JieShian: https://en.aiptz.com/
+-[X] Hangzhou SOAR: https://www.hzsoar.com/
+-[X] ZAEX / Zuoan: https://en.zaex.cmom.cn/
+- Hangzhou CQ Technology: https://www.hzcqtech.com/
+-[X] Fengtaida: https://www.fengtaida.com/
+-[X] Simis Group: https://www.simis-group.com/
+-[X] Dotworkz: https://dotworkz.com/  (STXL-CD serisi: https://shop.dotworkz.com/collections/stxl-series)
+-[X] moviTHERM: https://movitherm.com/  (küçük format, sınırlı uygunluk)
+-[X] VA Imaging: https://va-imaging.com/  (küçük format, sınırlı uygunluk)
+-[X] Will-Burt: https://www.willburt.com/  (küçük format, sınırlı uygunluk)
+-[X] 2B Security Systems: https://www.2bsecurity.com/  (muhafaza + PTZ birlikte)
+
+Kategori B — Ağır yük hassas PTZ / pan-tilt / gimbal üreticileri
+-[X] Quickset Defense Technologies: https://www.quickset.com/
+-[X] UAVOS: https://www.uavos.com/
+- Teledyne FLIR / Directed Perception PTU-D300E (distribütör üzerinden): https://movitherm.com/product/flir-ptu-d300e-standard-pan-tilt-for-side-mounted-payloads-up-to-70-lbs/
+- Sagebrush Technology: sagebrushtech.com  (site doğrudan doğrulanamadı, üçüncü taraf kaynaklıdır)
+- Aerotech: https://www.aerotech.com/
+- 2B Security Systems: https://www.2bsecurity.com/  (bkz. yukarı)
+
+Kategori C — Test sahası optik izleme entegratörleri (en yüksek öncelik)
+- IBJ Elektronische Systeme / Techbel: https://www.tech-bel.com/products-services/optical-tracking-mounts/
+- Cordin Company: https://www.cordin.com/
+
+Referans (büyük ölçekli, 1-10 adetlik küçük siparişe yanaşması belirsiz)
+- L3Harris (Kineto Tracking Mount): https://www.l3harris.com/all-capabilities/kineto-tracking-mount
+
+-----------------
+
+İLETİŞİM BİLGİLERİ (araştırıldı) — 23 Temmuz 2026
+Aşağıdaki bilgiler gerçek WebSearch/WebFetch sonuçlarından derlenmiştir, uydurulmamıştır.
+Zaten bilinen (markalar dosyasında kayıtlı) firmalar için bilgi tekrar aranmadı, doğrudan
+aşağı taşındı; yalnızca daha önce iletişim bilgisi bulunmayan 14 firma yeniden araştırıldı.
+
+Kategori A — Muhafaza (IP66/67, ısıtmalı/soğutmalı) üreticileri
+- BIT-CCTV / Blue Icon: sales@bit-cctv.com, +86 139 2068 8922 (Tianjin) [bilinen]
+- Tianjin Zhongan: yangqingye@chinazhongan.cn, zhanghongge@chinazhongan.cn, +86 22 8485 6666;
+[X]  İletişim Formu: https://www.zhonganptz.net/contact-us [bilinen]
+- AIPTZ / JieShian: aiptz@jsa-cctv.com, +86 755 8996 8730 (Shenzhen) [bilinen]
+- Hangzhou SOAR: sales@hzsoar.com, +86 158 5827 7138 (Hangzhou) [bilinen]
+- ZAEX / Zuoan: zaex@zaex.com.cn (Changzhou, Jiangsu) [bilinen]
+- Hangzhou CQ Technology: sales@hzcqtech.com, +86 571 8791 8727;
+[X]   İletişim Formu: https://www.hzcqtech.com/contactus.html [bilinen]
+- Fengtaida: sales6@fengtaida.com [bilinen]
+- Simis Group: info@simis-group.com, tel/WhatsApp +86 186 3510 8523;
+[X]  İletişim Formu: https://www.simis-group.com/contact
+  (Adres: Room 811, Block A, Ruijie Technology, Xiaodian District, Taiyuan, Shanxi, Çin)
+- Dotworkz: sales@dotworkz.com, tel +1 (866) 575-4689;
+[X]   İletişim Formu: https://dotworkz.com/contact-us/ (Santee, CA, ABD)
+- moviTHERM: info@movitherm.com, tel +1 (949) 699-6600;
+[X]   İletişim Formu: https://movitherm.com/contact-us/ (Irvine, CA, ABD)
+- VA Imaging: cs@va-imaging.com (genel/customer service); satış ve destek için ayrı
+  bölümler var ama bağımsız satış e-postası doğrulanamadı;
+  İletişim Formu: https://va-imaging.com/en-us/pages/contact
+  tel (Hollanda merkez) +31 40 851 4838, (ABD ofisi) +1 302 597 9002
+- Will-Burt: doğrudan e-posta bulunamadı — yalnızca genel İletişim Formu var:
+[X]   https://www.willburt.com/contact-will-burt/contact/
+  tel (kurumsal) +1 330 682 7015, (müşteri hizmetleri) +1 330 684 4000 (Ohio, ABD)
+- 2B Security Systems: 2b@2bsecurity.com, tel +45 4352 6600 (Roskilde, Danimarka;
+  "genellikle 24 saat içinde yanıt veriyoruz" notu var)
+
+Kategori B — Ağır yük hassas PTZ / pan-tilt / gimbal üreticileri
+- Quickset Defense Technologies: sales@quickset.com, tel +1 800 247 6563 (ayrıca
+[X]   +1 847 498 0700); İletişim Formu: https://www.quickset.com/contact-us/
+  (Northbrook, IL, ABD)
+- UAVOS: uavos@uavos.com (genel), media@uavos.com (basın);
+[X]   İletişim Formu: https://www.uavos.com/contact-us/ (Dover, DE, ABD ofisi)
+  — doğrudan telefon numarası sayfada bulunamadı
+- Teledyne FLIR / Directed Perception PTU-D300E: doğrudan e-posta bulunamadı —
+[X]   yalnızca genel "Contact Sales" web formu var: https://oem.flir.com/contact/contact-us/
+  (formda ürün kategorisi olarak "Pan Tilts" seçilmesi öneriliyor);
+  bölge ofisleri: Goleta CA, North Billerica MA, Charlotte NC (ABD) ve Meer (Belçika)
+-[X]  Sagebrush Technology, Inc.: sagebrushtech.com alan adı artık ELDEN ÇIKARILMIŞ/PARK
+  HALİNDE (fetch denemesi hugedomains.com satış sayfasına yönlendirdi) — şirketin
+  RIEtech Global, LLC adıyla faaliyete devam ettiğine dair kaynaklar var (Albuquerque,
+  NM). Doğrudan e-posta bulunamadı; bulunan tek iletişim kanalı telefon:
+  +1 505 299 6623 (adres: 5911 Jefferson St NE, Albuquerque, NM 87109). Güncel web
+  sitesi/iletişim formu tespit edilemedi — RIEtech Global adıyla ayrıca doğrulanmalı.
+-[X]  Aerotech, Inc.: doğrudan e-posta bulunamadı — yalnızca genel İletişim Formu var:
+  https://www.aerotech.com/contact/ , tel +1 412 963 7470 (Pittsburgh, PA, ABD)
+-[X]  2B Security Systems: bkz. yukarı (Kategori A)
+
+Kategori C — Test sahası optik izleme entegratörleri (en yüksek öncelik)
+- IBJ Elektronische Systeme GmbH / Techbel: doğrudan e-posta bulunamadı — yalnızca
+  genel İletişim Formu var: https://www.tech-bel.com/contact-us/
+  tel +972 (9) 742 5172, faks +972 (9) 742 5173
+  (adres: 11 Ha'Sadnaot St., Herzliya, İsrail — Techbel, IBJ'nin temsilcisi/partneri)
+- Cordin Company: inquiry@cordin.com, tel +1 801 972 5272
+  (bu adresin "Satış, Müşteri Desteği ve Genel Bilgi" için kullanıldığı belirtiliyor;
+  adres: 2460 South Main, Salt Lake City, UT 84115, ABD)
+
+Referans (büyük ölçekli, 1-10 adetlik küçük siparişe yanaşması belirsiz)
+- L3Harris (Kineto Tracking Mount): doğrudan e-posta veya ürüne özel bir satış
+  kanalı bulunamadı — yalnızca kurumsal genel İletişim Formu var:
+  https://www.l3harris.com/contact-us (formda "capability" olarak aranan ürünü
+  seçmek gerekiyor; genel merkez adresi: 1025 W. NASA Boulevard, Melbourne, FL 32919)
+
+ÖZET: 14 firmadan araştırılanların içinde 8 firma için gerçek/özel bir e-posta adresi
+bulundu (Simis Group, Dotworkz, moviTHERM, VA Imaging [genel/CS adresi], 2B Security,
+Quickset, UAVOS, Cordin Company). 5 firma için yalnızca genel bir "Contact Us" web
+formu ve/veya telefon bulunabildi, doğrudan e-posta bulunamadı (Will-Burt, Teledyne
+FLIR/Directed Perception, Aerotech, IBJ/Techbel, L3Harris). 1 firma için (Sagebrush
+Technology) ne e-posta ne de güncel bir web/iletişim formu bulunabildi — eski alan adı
+artık satışa çıkarılmış görünüyor; yalnızca bir telefon numarası ve şirketin muhtemelen
+RIEtech Global adı altında devam ettiğine dair dolaylı kaynaklar bulundu, bu nedenle
+ayrıca doğrulanması gerekir.

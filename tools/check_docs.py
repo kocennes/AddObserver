@@ -12,7 +12,9 @@ from urllib.parse import unquote
 
 
 METADATA_FIELDS = ("Durum", "Son gözden geçirme", "Sonraki gözden geçirme")
-METADATA_PATTERN = re.compile(r"^\*\*(?P<name>[^*]+):\*\*\s*(?P<value>.+?)\s*$", re.MULTILINE)
+METADATA_PATTERN = re.compile(
+    r"^\*\*(?P<name>[^*]+):\*\*\s*(?P<value>.+?)\s*$", re.MULTILINE
+)
 MARKDOWN_LINK_PATTERN = re.compile(r"(?<!!)\[[^]]*]\((?P<target>[^)]+)\)")
 MATRIX_DOC_PATTERN = re.compile(r"`(?P<target>(?:\.\./)?[A-Z][A-Z0-9_/-]*\.md)`")
 EXTERNAL_SCHEMES = ("http://", "https://", "mailto:")
@@ -28,12 +30,18 @@ ADR_REFERENCE_PATTERN = re.compile(r"docs/decisions/(?P<file>\d{4}-[A-Za-z0-9_-]
 # belgelerde en sık görülen mojibake dizileri. U+FFFD, çözümlenemeyen baytların kanıtıdır.
 MOJIBAKE_MARKERS = (
     "�",
-    "Ã§", "Ã‡",
-    "Ã¼", "Ãœ",
-    "Ã¶", "Ã–",
-    "Ä±", "Ä°",
-    "ÅŸ", "Åž",
-    "ÄŸ", "Äž",
+    "Ã§",
+    "Ã‡",
+    "Ã¼",
+    "Ãœ",
+    "Ã¶",
+    "Ã–",
+    "Ä±",
+    "Ä°",
+    "ÅŸ",
+    "Åž",
+    "ÄŸ",
+    "Äž",
 )
 
 
@@ -57,7 +65,9 @@ def documentation_files(root: Path) -> list[Path]:
 def validate_metadata(path: Path) -> list[Finding]:
     """Check required lifecycle metadata and ISO-formatted review dates."""
     text = path.read_text(encoding="utf-8")
-    metadata = {match["name"]: match["value"] for match in METADATA_PATTERN.finditer(text)}
+    metadata = {
+        match["name"]: match["value"] for match in METADATA_PATTERN.finditer(text)
+    }
     findings = [
         Finding(path, f"eksik metadata alanı: {field}")
         for field in METADATA_FIELDS
@@ -65,8 +75,12 @@ def validate_metadata(path: Path) -> list[Finding]:
     ]
 
     status = metadata.get("Durum", "")
-    if status and not (status.startswith("Kabul edildi") or status.startswith("Taslak")):
-        findings.append(Finding(path, "Durum 'Kabul edildi' veya 'Taslak' ile başlamalı"))
+    if status and not (
+        status.startswith("Kabul edildi") or status.startswith("Taslak")
+    ):
+        findings.append(
+            Finding(path, "Durum 'Kabul edildi' veya 'Taslak' ile başlamalı")
+        )
 
     for field in METADATA_FIELDS[1:]:
         value = metadata.get(field)
@@ -80,7 +94,11 @@ def _local_target(raw_target: str) -> str | None:
     if target.startswith("<") and target.endswith(">"):
         target = target[1:-1]
     target = target.split(maxsplit=1)[0]
-    if not target or target.startswith("#") or target.lower().startswith(EXTERNAL_SCHEMES):
+    if (
+        not target
+        or target.startswith("#")
+        or target.lower().startswith(EXTERNAL_SCHEMES)
+    ):
         return None
     return unquote(target.split("#", 1)[0])
 
@@ -111,7 +129,9 @@ def validate_documentation_matrix(root: Path) -> list[Finding]:
 def validate_review_freshness(path: Path, today: date) -> list[Finding]:
     """Check that a document's next scheduled review date has not lapsed."""
     text = path.read_text(encoding="utf-8")
-    metadata = {match["name"]: match["value"] for match in METADATA_PATTERN.finditer(text)}
+    metadata = {
+        match["name"]: match["value"] for match in METADATA_PATTERN.finditer(text)
+    }
     value = metadata.get("Sonraki gözden geçirme")
     if not value or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
         return []
@@ -121,7 +141,10 @@ def validate_review_freshness(path: Path, today: date) -> list[Finding]:
         return []
     if next_review < today:
         return [
-            Finding(path, f"gözden geçirme tarihi geçmiş: {value} (bugün: {today.isoformat()})")
+            Finding(
+                path,
+                f"gözden geçirme tarihi geçmiş: {value} (bugün: {today.isoformat()})",
+            )
         ]
     return []
 
@@ -135,7 +158,9 @@ def validate_encoding(path: Path) -> list[Finding]:
         if index == -1:
             continue
         line = text.count("\n", 0, index) + 1
-        findings.append(Finding(path, f"olası bozuk karakter kodlaması ({marker!r}), satır {line}"))
+        findings.append(
+            Finding(path, f"olası bozuk karakter kodlaması ({marker!r}), satır {line}")
+        )
     return findings
 
 
@@ -143,7 +168,9 @@ def adr_files(root: Path) -> list[Path]:
     """Return architecture decision records that require ADR lifecycle metadata."""
     decisions_dir = root / "docs" / "decisions"
     return sorted(
-        path for path in decisions_dir.glob("*.md") if path.is_file() and path.name != "README.md"
+        path
+        for path in decisions_dir.glob("*.md")
+        if path.is_file() and path.name != "README.md"
     )
 
 
@@ -190,7 +217,10 @@ def validate_adr_references(path: Path, adr_status: dict[str, str]) -> list[Find
         status = adr_status[adr_name]
         if status != "Kabul edildi":
             findings.append(
-                Finding(path, f"henüz kabul edilmemiş ADR'a referans veriyor: {adr_name} (Durum: {status})")
+                Finding(
+                    path,
+                    f"henüz kabul edilmemiş ADR'a referans veriyor: {adr_name} (Durum: {status})",
+                )
             )
     return findings
 
@@ -209,7 +239,9 @@ def validate_repository(root: Path, today: date | None = None) -> list[Finding]:
     findings.extend(validate_documentation_matrix(root))
     for path in adr_files(root):
         findings.extend(validate_adr_metadata(path))
-    adr_status = {path.name: _adr_metadata(path).get("Durum", "") for path in adr_files(root)}
+    adr_status = {
+        path.name: _adr_metadata(path).get("Durum", "") for path in adr_files(root)
+    }
     for path in markdown_files:
         findings.extend(validate_adr_references(path, adr_status))
     return findings
@@ -218,7 +250,9 @@ def validate_repository(root: Path, today: date | None = None) -> list[Finding]:
 def main(argv: list[str] | None = None) -> int:
     """Run checks and return a shell-friendly status code."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument(
+        "--root", type=Path, default=Path(__file__).resolve().parents[1]
+    )
     args = parser.parse_args(argv)
     root = args.root.resolve()
     findings = validate_repository(root)
@@ -226,7 +260,9 @@ def main(argv: list[str] | None = None) -> int:
         for finding in findings:
             print(finding.render(root), file=sys.stderr)
         return 1
-    print(f"Dokümantasyon kapısı başarılı: {len(documentation_files(root))} belge doğrulandı.")
+    print(
+        f"Dokümantasyon kapısı başarılı: {len(documentation_files(root))} belge doğrulandı."
+    )
     return 0
 
 

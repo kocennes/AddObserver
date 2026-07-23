@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
+from collections.abc import Iterable
 from datetime import UTC, datetime
 
 from .models import AdsAccount, CredentialStatus, OAuthCredential, Principal, PrincipalStatus
@@ -165,6 +166,47 @@ class AdsAccountRepository:
             ("disconnected", principal_id),
         )
         self._conn.commit()
+
+    def synchronize_accounts(
+        self,
+        principal_id: str,
+        discovered: Iterable[tuple[str, str | None]],
+    ) -> list[AdsAccount]:
+        """Atomically replace one principal's active-access snapshot.
+
+        Historical rows are retained as ``disconnected``; discovered rows are
+        inserted or reactivated. No row belonging to another principal can be
+        updated, even when both principals share the same Google customer ID.
+        """
+        normalized = dict(discovered)
+        with self._conn:
+            self._conn.execute(
+                "UPDATE ads_account SET status = ? WHERE principal_id = ?",
+                ("disconnected", principal_id),
+            )
+            for customer_id, login_customer_id in sorted(normalized.items()):
+                existing = self.get_account(principal_id, customer_id)
+                if existing is None:
+                    self._conn.execute(
+                        "INSERT INTO ads_account "
+                        "(id, principal_id, customer_id, login_customer_id, status, created_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (
+                            _new_id(),
+                            principal_id,
+                            customer_id,
+                            login_customer_id,
+                            "active",
+                            _now(),
+                        ),
+                    )
+                else:
+                    self._conn.execute(
+                        "UPDATE ads_account SET status = ?, login_customer_id = ? "
+                        "WHERE id = ? AND principal_id = ?",
+                        ("active", login_customer_id, existing.id, principal_id),
+                    )
+        return self.list_active_accounts(principal_id)
 
 
 def _account_from_row(row: sqlite3.Row) -> AdsAccount:
